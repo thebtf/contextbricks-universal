@@ -1,6 +1,6 @@
 {
   "name": "contextbricks-universal",
-  "version": "4.2.0",
+  "version": "4.2.1",
   "description": "Universal cross-platform statusline for Claude Code CLI with context brick visualization. Windows, Linux, macOS. No bash or jq required.",
   "keywords": [
     "claude",
@@ -17,8 +17,8 @@
     "cross-platform"
   ],
   "bin": {
-    "contextbricks": "./bin/cli.js",
-    "contextbricks-universal": "./bin/cli.js"
+    "contextbricks": "bin/cli.js",
+    "contextbricks-universal": "bin/cli.js"
   },
   "main": "./scripts/statusline.js",
   "scripts": {
@@ -41,7 +41,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/thebtf/contextbricks-universal.git"
+    "url": "git+https://github.com/thebtf/contextbricks-universal.git"
   },
   "bugs": {
     "url": "https://github.com/thebtf/contextbricks-universal/issues"

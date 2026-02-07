@@ -22,7 +22,7 @@
   "main": "./scripts/statusline.js",
   "scripts": {
     "test": "node bin/cli.js test",
-    "postinstall": "echo ContextBricks installed! Run: contextbricks init"
+    "postinstall": "echo ContextBricks installed! Run: contextbricks install"
   },
   "files": [
     "bin/",

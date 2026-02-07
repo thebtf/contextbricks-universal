@@ -67,6 +67,10 @@ function install() {
 
   // Copy statusline.js
   console.log('Installing status line script...');
+  if (!fs.existsSync(STATUSLINE_SCRIPT)) {
+    console.error(`${c.red}Error: Source script not found: ${STATUSLINE_SCRIPT}${c.reset}`);
+    process.exit(1);
+  }
   fs.copyFileSync(STATUSLINE_SCRIPT, INSTALL_PATH);
   console.log(`   Installed: ${INSTALL_PATH}`);
   console.log('');
@@ -97,8 +101,13 @@ function install() {
     padding: 0,
   };
 
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2) + '\n', 'utf8');
-  console.log('   Settings updated');
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+    console.log('   Settings updated');
+  } catch (err) {
+    console.error(`${c.red}Error: Could not write settings.json: ${err.message}${c.reset}`);
+    process.exit(1);
+  }
 
   console.log(`
 ${c.green}Installation complete!${c.reset}
@@ -106,7 +115,7 @@ ${c.green}Installation complete!${c.reset}
 ${c.bold}Your status line will show:${c.reset}
    - Model name (Sonnet 4.5, Opus 4, etc.)
    - Git repo:branch [commit] message
-   - Git status indicators (*uncommitted, ^ahead, vbehind)
+   - Git status indicators (*uncommitted, ↑ahead, ↓behind)
    - Lines changed this session (+added/-removed)
    - Real-time context usage with brick visualization
    - Session duration and cost

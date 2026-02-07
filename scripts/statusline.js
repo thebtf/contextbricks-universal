@@ -122,7 +122,7 @@ function main() {
 
   // Configuration from environment variables
   const showDir = process.env.CONTEXTBRICKS_SHOW_DIR !== '0'; // default: on
-  const totalBricks = Number(process.env.CONTEXTBRICKS_BRICKS) || 30;
+  const totalBricks = Math.max(1, Number(process.env.CONTEXTBRICKS_BRICKS) || 30);
 
   // Resolve working directory (no process.chdir — pass cwd to git instead)
   const cwd = resolveGitCwd(currentDir);

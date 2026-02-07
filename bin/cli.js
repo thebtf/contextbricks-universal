@@ -264,7 +264,7 @@ switch (command) {
   case '--version':
   case '-v': {
     const pkg = require('../package.json');
-    console.log(`contextbricks v${pkg.version}`);
+    console.log(`contextbricks-universal v${pkg.version}`);
     break;
   }
 

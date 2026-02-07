@@ -25,10 +25,24 @@
 ### Quick Install (Recommended)
 
 ```bash
-npx contextbricks
+npm install -g contextbricks-universal
+contextbricks install
+```
+
+Or one-liner via npx (installs and runs automatically):
+
+```bash
+npx contextbricks-universal
 ```
 
 Node.js is the only requirement (already present if you use Claude Code).
+
+### From GitHub (without npm)
+
+```bash
+npm install -g github:thebtf/contextbricks-universal
+contextbricks install
+```
 
 ### From Source
 
@@ -162,7 +176,7 @@ Line 4 shows your current utilization of Claude's rate limits — useful for Max
 ## Testing
 
 ```bash
-npx contextbricks test
+contextbricks test
 ```
 
 ## Requirements
@@ -179,13 +193,13 @@ No bash, jq, bc, sed, cut, or any other Unix tools required.
 | **Platform** | Linux/macOS only | Windows + Linux + macOS |
 | **Dependencies** | bash, jq, git, bc, sed, cut | Node.js only (git optional) |
 | **JSON parsing** | External `jq` | Native `JSON.parse()` |
-| **Install** | Shell scripts | `npx contextbricks` |
+| **Install** | Shell scripts | `npm i -g contextbricks-universal` |
 | **Output** | Identical | Identical |
 
 ## Uninstallation
 
 ```bash
-npx contextbricks uninstall
+contextbricks uninstall
 ```
 
 Or manually:

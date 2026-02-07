@@ -28,7 +28,7 @@ const SETTINGS_FILE = path.join(CLAUDE_DIR, 'settings.json');
 
 function checkDependencies() {
   // git is optional but recommended
-  const gitResult = spawnSync('git', ['--version'], { stdio: 'pipe', windowsHide: true });
+  const gitResult = spawnSync('git', ['--version'], { stdio: 'pipe', windowsHide: true, timeout: 5000 });
   if (gitResult.status !== 0) {
     console.warn(`${c.yellow}Warning: git not found. Git info will not be available.${c.reset}`);
   }

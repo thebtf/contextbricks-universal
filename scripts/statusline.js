@@ -84,6 +84,17 @@ function git(args, cwd, fallback = '') {
   }
 }
 
+// Safely traverse nested object path like 'a.b.c'
+function getPath(obj, dotPath) {
+  const parts = dotPath.split('.');
+  let current = obj;
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
 // ANSI color helpers
 const c = {
   reset: '\x1b[0m',
@@ -497,17 +508,6 @@ function main() {
       process.stdout.write(line4 + '\n');
     }
   }
-}
-
-// Safely traverse nested object path like 'a.b.c'
-function getPath(obj, dotPath) {
-  const parts = dotPath.split('.');
-  let current = obj;
-  for (const part of parts) {
-    if (current == null || typeof current !== 'object') return undefined;
-    current = current[part];
-  }
-  return current;
 }
 
 main();

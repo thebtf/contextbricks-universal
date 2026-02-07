@@ -195,7 +195,7 @@ Or manually:
 
 ## Acknowledgements
 
-This project is a cross-platform Node.js rewrite of [ContextBricks](https://github.com/jezweb/claude-skills/tree/main/tools/statusline) originally created by [Jeremy Dawes](https://github.com/jezweb) ([jezweb.com.au](https://jezweb.com.au)). The original bash implementation provided the foundation for the statusline format, brick visualization, and git integration.
+This project is a cross-platform Node.js rewrite of [ContextBricks](https://github.com/jezweb/claude-skills/tree/main/tools/statusline) created by [Jeremy Dawes](https://github.com/jezweb) ([jezweb.com.au](https://jezweb.com.au)). The original bash implementation provided the foundation for the statusline format, brick visualization, and git integration.
 
 Also inspired by [ccstatusline](https://github.com/sirmalloc/ccstatusline).
 

@@ -233,6 +233,7 @@ function test() {
     input: sampleData,
     encoding: 'utf8',
     windowsHide: true,
+    timeout: 10000,
   });
 
   if (result.stdout) {

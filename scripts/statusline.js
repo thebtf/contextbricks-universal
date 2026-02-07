@@ -197,7 +197,7 @@ function fetchUsageData(token, input) {
     if (result.status === 0 && result.stdout) {
       const data = JSON.parse(result.stdout);
       // Only cache valid usage data (not error responses)
-      if (data && (data.five_hour || data.seven_day || data.seven_day_opus)) {
+      if (data && (data.five_hour || data.seven_day || data.seven_day_sonnet || data.seven_day_opus)) {
         try {
           fs.writeFileSync(cacheFile, JSON.stringify({ timestamp: Date.now(), data }), {
             encoding: 'utf8',

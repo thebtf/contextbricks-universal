@@ -8,15 +8,17 @@
 [Sonnet 4.5] claude-skills:main *↑2 | +145/-23
 [5f2ce67] Remove auth-js skill
 [■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87
+5h:64% ~23m | 7d:57% ~1d23h | sonnet:9% ~3d23h
 ```
 
 ## Features
 
 - **Real-time context tracking** — brick visualization of context window usage
+- **Rate limit tracking** — 5-hour and 7-day utilization with reset timers (Max/Pro subscribers)
 - **Official percentage fields** (Claude Code 2.1.6+) with fallback calculation (2.0.70+)
 - **Git integration** — repo, branch, commit hash, message, dirty/ahead/behind indicators
 - **Session metrics** — model name, lines changed, duration, cost (hidden for Max subscribers)
-- **Environment config** — `CONTEXTBRICKS_SHOW_DIR`, `CONTEXTBRICKS_BRICKS` for customization
+- **Environment config** — `CONTEXTBRICKS_SHOW_DIR`, `CONTEXTBRICKS_BRICKS`, `CONTEXTBRICKS_SHOW_LIMITS`
 
 ## Installation
 
@@ -62,6 +64,12 @@ node bin/cli.js install
 [■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87
 ```
 
+### Line 4 — Rate Limits (Max/Pro subscribers)
+
+```
+5h:64% ~23m | 7d:57% ~1d23h | sonnet:9% ~3d23h
+```
+
 | Symbol | Meaning |
 |--------|---------|
 | `■` (cyan) | Used context |
@@ -69,6 +77,11 @@ node bin/cli.js install
 | `*` | Uncommitted changes |
 | `↑3` | Ahead of remote by 3 |
 | `↓2` | Behind remote by 2 |
+| `5h:X%` | 5-hour rolling limit utilization |
+| `7d:X%` | 7-day overall limit utilization |
+| `sonnet:X%` | 7-day Sonnet sub-limit (if applicable) |
+| `opus:X%` | 7-day Opus sub-limit (if applicable) |
+| `~22m` / `~1d23h` | Time until limit resets (exact by default) |
 
 ## Configuration
 
@@ -76,6 +89,8 @@ node bin/cli.js install
 |---|---|---|
 | `CONTEXTBRICKS_SHOW_DIR` | `1` | Show current subdirectory (`0` to hide) |
 | `CONTEXTBRICKS_BRICKS` | `30` | Number of bricks in the visualization |
+| `CONTEXTBRICKS_SHOW_LIMITS` | `1` | Show rate limit utilization (`0` to hide) |
+| `CONTEXTBRICKS_RESET_EXACT` | `1` | Exact reset times `~1d23h` (`0` for approximate `~1d`) |
 
 ## How It Works
 
@@ -110,6 +125,39 @@ The installer configures `~/.claude/settings.json`:
   }
 }
 ```
+
+## Rate Limit Tracking
+
+Line 4 shows your current utilization of Claude's rate limits — useful for Max and Pro subscribers to avoid hitting caps.
+
+### How It Works
+
+1. Reads your OAuth token from Claude Code credentials (`~/.claude/.credentials.json`, or macOS keychain)
+2. Fetches usage data from `api.anthropic.com/api/oauth/usage`
+3. Caches the response for 5 minutes (`~/.claude/.usage-cache.json`)
+4. Displays utilization percentages with color coding:
+   - **Green** (0-49%) — plenty of capacity
+   - **Yellow** (50-79%) — approaching limit
+   - **Red** (80-100%) — near or at limit
+
+### Requirements
+
+- Active Claude Max or Pro subscription with OAuth credentials
+- API-only users will not see Line 4 (gracefully skipped)
+
+### Privacy
+
+- Your OAuth token is never logged or exposed in command arguments
+- Token is passed to the HTTPS subprocess via environment variable
+- Cache file (`~/.claude/.usage-cache.json`) is stored locally
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Line 4 not showing | Verify `~/.claude/.credentials.json` exists with `claudeAiOauth.accessToken` |
+| Stale data | Delete `~/.claude/.usage-cache.json` to force refresh |
+| Want to hide Line 4 | Set `CONTEXTBRICKS_SHOW_LIMITS=0` |
 
 ## Testing
 

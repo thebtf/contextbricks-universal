@@ -206,6 +206,7 @@ ${c.green}More Info:${c.reset}
 function test() {
   console.log(`${c.cyan}Testing statusline with sample data...${c.reset}\n`);
 
+  const now = Date.now();
   const sampleData = JSON.stringify({
     model: { display_name: 'Sonnet 4.5' },
     workspace: { current_dir: process.cwd() },
@@ -219,6 +220,12 @@ function test() {
       total_cost_usd: 0.87,
       total_lines_added: 145,
       total_lines_removed: 23,
+    },
+    _mock_rate_limits: {
+      five_hour: { utilization: 64.0, resets_at: new Date(now + 23 * 60000).toISOString() },
+      seven_day: { utilization: 57.0, resets_at: new Date(now + 2 * 86400000).toISOString() },
+      seven_day_sonnet: { utilization: 9.0, resets_at: new Date(now + 4 * 86400000).toISOString() },
+      seven_day_opus: null,
     },
   });
 

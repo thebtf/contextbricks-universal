@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 
 // Claude Code Custom Status Line (Node.js / Cross-Platform)
-// v4.1.0 - Node.js rewrite for Windows + Linux + macOS
+// v4.2.0 - Node.js rewrite for Windows + Linux + macOS
 // Line 1: Model | Repo:Branch [subdir] | git status | lines changed
 // Line 2: [commit] commit message
 // Line 3: Context bricks | percentage | free | duration | cost
+// Line 4: Rate limit utilization (5h, 7d Sonnet, 7d Opus) — Max/Pro subscribers
 //
 // Configuration via environment variables:
 //   CONTEXTBRICKS_SHOW_DIR=1   Show current subdirectory (default: 1)
 //   CONTEXTBRICKS_SHOW_DIR=0   Hide subdirectory
 //   CONTEXTBRICKS_BRICKS=40    Number of bricks (default: 30)
+//   CONTEXTBRICKS_SHOW_LIMITS=0 Hide rate limit line (default: shown)
+//   CONTEXTBRICKS_RESET_EXACT=0 Approximate reset times (default: exact)
 //
 // Uses new percentage fields (Claude Code 2.1.6+) for accurate context display.
 // Falls back to current_usage calculation for older versions.
@@ -97,6 +100,193 @@ const c = {
   cyanNorm: '\x1b[0;36m',
   yellowNorm: '\x1b[0;33m',
 };
+
+// Read OAuth token from Claude Code credentials
+function readOAuthToken() {
+  try {
+    if (process.platform === 'darwin') {
+      // macOS: try keychain first
+      const result = spawnSync('security', [
+        'find-generic-password',
+        '-s', 'Claude Code-credentials',
+        '-w',
+      ], {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 3000,
+        windowsHide: true,
+      });
+      if (result.status === 0 && result.stdout) {
+        try {
+          const creds = JSON.parse(result.stdout.trim());
+          const token = getPath(creds, 'claudeAiOauth.accessToken');
+          if (token) return token;
+        } catch {
+          // keychain data not valid JSON, fall through to file
+        }
+      }
+    }
+
+    // Win/Linux (and macOS fallback): read credentials file
+    const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
+    const raw = fs.readFileSync(credPath, 'utf8');
+    const creds = JSON.parse(raw);
+    return getPath(creds, 'claudeAiOauth.accessToken') || null;
+  } catch {
+    return null;
+  }
+}
+
+// Fetch usage data from Anthropic API with file-based caching
+function fetchUsageData(token, input) {
+  // Check for mock data in input (test mode)
+  const mockData = getPath(input, '_mock_rate_limits');
+  if (mockData) return mockData;
+
+  if (!token) return null;
+
+  const cacheFile = path.join(os.homedir(), '.claude', '.usage-cache.json');
+  const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+  // Try cache first
+  try {
+    const cacheRaw = fs.readFileSync(cacheFile, 'utf8');
+    const cache = JSON.parse(cacheRaw);
+    if (cache.timestamp && (Date.now() - cache.timestamp) < CACHE_TTL_MS) {
+      return cache.data;
+    }
+  } catch {
+    // no cache or invalid
+  }
+
+  // Fetch from API using sync subprocess (token via env var for security)
+  const httpsScript = `
+    const https = require('https');
+    const options = {
+      hostname: 'api.anthropic.com',
+      path: '/api/oauth/usage',
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + process.env.ANTHROPIC_TOKEN,
+        'anthropic-beta': 'oauth-2025-04-20',
+        'Accept': 'application/json',
+      },
+    };
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          process.stdout.write(body);
+        }
+      });
+    });
+    req.on('error', () => {});
+    req.end();
+  `;
+
+  try {
+    const result = spawnSync(process.execPath, ['-e', httpsScript], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 4000,
+      windowsHide: true,
+      env: { ...process.env, ANTHROPIC_TOKEN: token },
+    });
+
+    if (result.status === 0 && result.stdout) {
+      const data = JSON.parse(result.stdout);
+      // Only cache valid usage data (not error responses)
+      if (data && (data.five_hour || data.seven_day || data.seven_day_opus)) {
+        try {
+          fs.writeFileSync(cacheFile, JSON.stringify({ timestamp: Date.now(), data }), {
+            encoding: 'utf8',
+            mode: 0o600,
+          });
+        } catch {
+          // cache write failure is non-fatal
+        }
+      }
+      return data;
+    }
+  } catch {
+    // API call failed — try stale cache
+    try {
+      const cacheRaw = fs.readFileSync(cacheFile, 'utf8');
+      const cache = JSON.parse(cacheRaw);
+      if (cache.data) return cache.data;
+    } catch {
+      // no stale cache
+    }
+  }
+
+  return null;
+}
+
+// Return 256-color ANSI code for smooth green → yellow → red gradient
+function getColorForUtilization(pct) {
+  // 256-color: green(46) → yellow(226) → red(196), 11 stops at ~10% intervals
+  const gradient = [46, 82, 118, 154, 190, 226, 220, 214, 208, 202, 196];
+  const clamped = Math.max(0, Math.min(100, pct));
+  const idx = Math.min(Math.round(clamped / 10), gradient.length - 1);
+  return `\x1b[38;5;${gradient[idx]}m`;
+}
+
+// Format ISO reset time string to human-readable relative time
+// exact=true: "1h30m", "2d5h"  |  exact=false: "1h", "2d"
+function formatResetTime(isoStr, exact) {
+  if (!isoStr) return '';
+  try {
+    const resetMs = new Date(isoStr).getTime();
+    const diffMs = resetMs - Date.now();
+    if (diffMs <= 0) return '0m';
+
+    const totalMin = Math.floor(diffMs / 60000);
+    const totalHours = Math.floor(totalMin / 60);
+    const remainMin = totalMin % 60;
+    const days = Math.floor(totalHours / 24);
+    const remainHours = totalHours % 24;
+
+    if (!exact) {
+      if (totalMin < 60) return `${totalMin}m`;
+      if (totalHours < 24) return `${totalHours}h`;
+      return `${days}d`;
+    }
+
+    // Exact mode: combined units
+    if (totalMin < 60) return `${totalMin}m`;
+    if (totalHours < 24) {
+      return remainMin > 0 ? `${totalHours}h${remainMin}m` : `${totalHours}h`;
+    }
+    return remainHours > 0 ? `${days}d${remainHours}h` : `${days}d`;
+  } catch {
+    return '';
+  }
+}
+
+// Build a single rate limit segment like "5h:23% ~1h30m"
+function buildLimitSegment(data, key, label, exact) {
+  const pct = getPath(data, `${key}.utilization`);
+  if (pct == null) return null;
+  const color = getColorForUtilization(pct);
+  const resetStr = formatResetTime(getPath(data, `${key}.resets_at`), exact);
+  let segment = `${c.dimWhite}${label}:${c.reset}${color}${Math.round(pct)}%${c.reset}`;
+  if (resetStr) segment += ` ${c.dim}~${resetStr}${c.reset}`;
+  return segment;
+}
+
+// Assemble rate limit Line 4 from usage data
+function formatRateLimitLine(data) {
+  if (!data) return '';
+  const exact = process.env.CONTEXTBRICKS_RESET_EXACT !== '0'; // default: exact
+  const segments = [
+    buildLimitSegment(data, 'five_hour', '5h', exact),
+    buildLimitSegment(data, 'seven_day', '7d', exact),
+    buildLimitSegment(data, 'seven_day_sonnet', 'sonnet', exact),
+    buildLimitSegment(data, 'seven_day_opus', 'opus', exact),
+  ].filter(Boolean);
+  return segments.length > 0 ? segments.join(' | ') : '';
+}
 
 function main() {
   // Read JSON from stdin
@@ -296,6 +486,17 @@ function main() {
     process.stdout.write(line2 + '\n');
   }
   process.stdout.write(brickLine + '\n');
+
+  // Line 4: Rate limit utilization
+  const showLimits = process.env.CONTEXTBRICKS_SHOW_LIMITS !== '0';
+  if (showLimits) {
+    const token = readOAuthToken();
+    const usageData = fetchUsageData(token, input);
+    const line4 = formatRateLimitLine(usageData);
+    if (line4) {
+      process.stdout.write(line4 + '\n');
+    }
+  }
 }
 
 // Safely traverse nested object path like 'a.b.c'

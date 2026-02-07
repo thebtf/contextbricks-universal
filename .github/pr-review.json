@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "invoke": {
+    "agents": ["coderabbit", "gemini", "codex"],
+    "defaults": {
+      "focus": "best-practices"
+    }
+  }
+}

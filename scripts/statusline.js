@@ -137,6 +137,21 @@ function readOAuthToken() {
   }
 }
 
+// Validate usage data structure and types before caching
+function isValidUsageData(data) {
+  if (!data || typeof data !== 'object') return false;
+  
+  const checkLimit = (limit) => {
+    if (!limit || typeof limit !== 'object') return false;
+    const util = limit.utilization;
+    return typeof util === 'number' && !isNaN(util) && util >= 0;
+  };
+  
+  // At least one valid limit must be present
+  return checkLimit(data.five_hour) || checkLimit(data.seven_day) || 
+         checkLimit(data.seven_day_opus) || checkLimit(data.seven_day_sonnet);
+}
+
 // Fetch usage data from Anthropic API with file-based caching
 function fetchUsageData(token, input) {
   // Check for mock data in input (test mode)
@@ -197,7 +212,7 @@ function fetchUsageData(token, input) {
     if (result.status === 0 && result.stdout) {
       const data = JSON.parse(result.stdout);
       // Only cache valid usage data (not error responses)
-      if (data && (data.five_hour || data.seven_day || data.seven_day_opus)) {
+      if (isValidUsageData(data)) {
         try {
           fs.writeFileSync(cacheFile, JSON.stringify({ timestamp: Date.now(), data }), {
             encoding: 'utf8',
@@ -225,6 +240,8 @@ function fetchUsageData(token, input) {
 
 // Return 256-color ANSI code for smooth green → yellow → red gradient
 function getColorForUtilization(pct) {
+  // Validate input to prevent NaN from corrupting ANSI sequences
+  if (typeof pct !== 'number' || isNaN(pct)) return '\x1b[0m'; // reset/default
   // 256-color: green(46) → yellow(226) → red(196), 11 stops at ~10% intervals
   const gradient = [46, 82, 118, 154, 190, 226, 220, 214, 208, 202, 196];
   const clamped = Math.max(0, Math.min(100, pct));
@@ -238,6 +255,8 @@ function formatResetTime(isoStr, exact) {
   if (!isoStr) return '';
   try {
     const resetMs = new Date(isoStr).getTime();
+    // Validate date to prevent NaN propagation
+    if (isNaN(resetMs)) return '';
     const diffMs = resetMs - Date.now();
     if (diffMs <= 0) return '0m';
 
@@ -267,7 +286,8 @@ function formatResetTime(isoStr, exact) {
 // Build a single rate limit segment like "5h:23% ~1h30m"
 function buildLimitSegment(data, key, label, exact) {
   const pct = getPath(data, `${key}.utilization`);
-  if (pct == null) return null;
+  // Validate percentage to prevent "NaN%" display
+  if (pct == null || typeof pct !== 'number' || isNaN(pct)) return null;
   const color = getColorForUtilization(pct);
   const resetStr = formatResetTime(getPath(data, `${key}.resets_at`), exact);
   let segment = `${c.dimWhite}${label}:${c.reset}${color}${Math.round(pct)}%${c.reset}`;

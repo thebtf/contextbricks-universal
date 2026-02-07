@@ -76,9 +76,8 @@ function install() {
   console.log('');
 
   // Build the command string for settings.json
-  // Use forward slashes for cross-platform compatibility
-  const homedir = os.homedir().replace(/\\/g, '/');
-  const statuslineCommand = `node ${homedir}/.claude/statusline.js`;
+  // Use the absolute path to the Node.js executable for reliability
+  const statuslineCommand = `${process.execPath} ${INSTALL_PATH}`.replace(/\\/g, '/');
 
   // Update settings.json
   const settingsBackup = backupFile(SETTINGS_FILE);

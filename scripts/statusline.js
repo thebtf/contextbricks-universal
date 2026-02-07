@@ -185,7 +185,16 @@ function fetchUsageData(token, input) {
     };
     const req = https.request(options, (res) => {
       let body = '';
-      res.on('data', (chunk) => body += chunk);
+      let totalSize = 0;
+      const MAX_BODY_SIZE = 1024 * 1024; // 1MB
+      res.on('data', (chunk) => {
+        totalSize += chunk.length;
+        if (totalSize > MAX_BODY_SIZE) {
+          req.destroy();
+          return;
+        }
+        body += chunk;
+      });
       res.on('end', () => {
         if (res.statusCode === 200) {
           process.stdout.write(body);
@@ -249,6 +258,7 @@ function formatResetTime(isoStr, exact) {
   if (!isoStr) return '';
   try {
     const resetMs = new Date(isoStr).getTime();
+    if (isNaN(resetMs)) return '';
     const diffMs = resetMs - Date.now();
     if (diffMs <= 0) return '0m';
 

@@ -352,7 +352,7 @@ function main() {
 
     // Detect git worktree: --git-dir differs from --git-common-dir
     const commonDir = git(['rev-parse', '--git-common-dir'], cwd);
-    if (commonDir && gitDir) {
+    if (commonDir) {
       const resolvedGitDir = path.resolve(cwd, gitDir);
       const resolvedCommonDir = path.resolve(cwd, commonDir);
       if (resolvedGitDir !== resolvedCommonDir) {

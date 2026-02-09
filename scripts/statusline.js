@@ -342,7 +342,7 @@ function main() {
   let gitStatus = '';
   let subDir = ''; // path relative to repo root
 
-  let isWorktree = false;
+  let worktreeName = ''; // non-empty when inside a linked worktree
 
   const gitDir = git(['rev-parse', '--git-dir'], cwd);
   if (gitDir) {
@@ -356,7 +356,7 @@ function main() {
       const resolvedGitDir = path.resolve(cwd, gitDir);
       const resolvedCommonDir = path.resolve(cwd, commonDir);
       if (resolvedGitDir !== resolvedCommonDir) {
-        isWorktree = true;
+        worktreeName = repoName; // current folder is the worktree name
         // Main repo name from the parent of .git common dir
         repoName = path.basename(path.dirname(resolvedCommonDir));
       }
@@ -399,8 +399,8 @@ function main() {
   // Repo:Branch + subdirectory
   if (repoName) {
     line1 += `${c.green}${repoName}${c.reset}`;
-    if (isWorktree) {
-      line1 += `${c.dim}(wt)${c.reset}`;
+    if (worktreeName) {
+      line1 += `${c.dim}(wt:${worktreeName})${c.reset}`;
     }
     if (branch) {
       line1 += `:${c.blue}${branch}${c.reset}`;

@@ -329,7 +329,19 @@ function main() {
 
   // Configuration from environment variables
   const showDir = process.env.CONTEXTBRICKS_SHOW_DIR !== '0'; // default: on
-  const totalBricks = Math.max(1, Number(process.env.CONTEXTBRICKS_BRICKS) || 30);
+
+  // Terminal width for dynamic content sizing (stdout is piped, so columns may be 0/undefined)
+  const termWidth = Number(process.env.CONTEXTBRICKS_WIDTH)
+    || (process.stdout.columns > 0 ? process.stdout.columns : 0)
+    || Number(process.env.COLUMNS)
+    || 80;
+
+  // Reserve ~35 chars for bricks stats (" 78% | 44k free | 1h5m | $12.90")
+  const maxAutoBricks = Math.max(5, termWidth - 35);
+  const totalBricks = Math.max(1, Math.min(
+    Number(process.env.CONTEXTBRICKS_BRICKS) || 30,
+    maxAutoBricks
+  ));
 
   // Resolve working directory (no process.chdir — pass cwd to git instead)
   const cwd = resolveGitCwd(currentDir);
@@ -434,7 +446,9 @@ function main() {
   if (commitShort) {
     line2 += `${c.yellow}[${commitShort}]${c.reset}`;
     if (commitMsg) {
-      const truncatedMsg = commitMsg.length > 55 ? commitMsg.substring(0, 55) + '...' : commitMsg;
+      const hashPrefixLen = commitShort ? commitShort.length + 3 : 0; // "[hash] "
+      const maxMsgLen = Math.max(10, termWidth - hashPrefixLen - 3); // 3 for "..."
+      const truncatedMsg = commitMsg.length > maxMsgLen ? commitMsg.substring(0, maxMsgLen) + '...' : commitMsg;
       line2 += ` ${truncatedMsg}`;
     }
   }

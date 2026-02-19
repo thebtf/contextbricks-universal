@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Claude Code Custom Status Line (Node.js / Cross-Platform)
-// v4.2.0 - Node.js rewrite for Windows + Linux + macOS
+// v4.3.0 - Node.js rewrite for Windows + Linux + macOS
 // Line 1: Model | Repo:Branch [subdir] | git status | lines changed
 // Line 2: [commit] commit message
 // Line 3: Context bricks | percentage | free | duration | cost
@@ -13,6 +13,8 @@
 //   CONTEXTBRICKS_BRICKS=40    Number of bricks (default: 30)
 //   CONTEXTBRICKS_SHOW_LIMITS=0 Hide rate limit line (default: shown)
 //   CONTEXTBRICKS_RESET_EXACT=0 Approximate reset times (default: exact)
+//   CONTEXTBRICKS_RIGHT_PADDING=28 Reserve N chars on right of Line 1 for Claude annotations
+//                                  (auto-set to 28 when TERM_PROGRAM=vscode)
 //
 // Uses new percentage fields (Claude Code 2.1.6+) for accurate context display.
 // Falls back to current_usage calculation for older versions.
@@ -305,6 +307,15 @@ function formatRateLimitLine(data) {
   return segments.length > 0 ? segments.join(' | ') : '';
 }
 
+// Strip ANSI escape codes to measure visible string length
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+function visibleLen(s) {
+  return stripAnsi(s).length;
+}
+
 function main() {
   // Read JSON from stdin
   const raw = readStdin();
@@ -335,6 +346,12 @@ function main() {
     || (process.stdout.columns > 0 ? process.stdout.columns : 0)
     || Number(process.env.COLUMNS)
     || 80;
+
+  // Right-padding: reserve space for Claude Code's right-aligned injections on Line 1
+  // e.g. "/ide for Visual Studio Code" (27 chars + 1 separator = 28)
+  const basePadding = Number(process.env.CONTEXTBRICKS_RIGHT_PADDING) || 0;
+  const isVSCode = process.env.TERM_PROGRAM === 'vscode';
+  const rightPadding = basePadding + (isVSCode ? 28 : 0);
 
   // Reserve ~35 chars for bricks stats (" 78% | 44k free | 1h5m | $12.90")
   const maxAutoBricks = Math.max(5, termWidth - 35);
@@ -403,42 +420,64 @@ function main() {
   }
 
   // === Build Line 1: Model + Repo:Branch + Status + Changes ===
-  let line1 = '';
+  // Build optional segments separately for graceful degradation when
+  // Claude Code injects right-aligned text on the same terminal row.
 
-  // Model in brackets
-  line1 += `${c.cyan}[${model}]${c.reset} `;
-
-  // Repo:Branch + subdirectory
+  // Core (always shown): [model] repo:branch * git-status
+  let line1Core = '';
+  line1Core += `${c.cyan}[${model}]${c.reset} `;
   if (repoName) {
-    line1 += `${c.green}${repoName}${c.reset}`;
-    if (worktreeName) {
-      line1 += `${c.dim}(wt:${worktreeName})${c.reset}`;
-    }
-    if (branch) {
-      line1 += `:${c.blue}${branch}${c.reset}`;
-    }
-    if (subDir) {
-      line1 += ` ${c.dim}${subDir}${c.reset}`;
-    }
+    line1Core += `${c.green}${repoName}${c.reset}`;
   } else if (showDir) {
-    // No git repo — show tilde-compressed path
     const home = os.homedir();
     let displayPath = cwd.replace(/\\/g, '/');
     const homeNorm = home.replace(/\\/g, '/');
     if (displayPath.startsWith(homeNorm)) {
       displayPath = '~' + displayPath.slice(homeNorm.length);
     }
-    line1 += `${c.dim}${displayPath}${c.reset}`;
+    line1Core += `${c.dim}${displayPath}${c.reset}`;
   }
 
-  // Git status indicators
-  if (gitStatus) {
-    line1 += ` ${c.red}${gitStatus}${c.reset}`;
+  // Optional: worktree name
+  const worktreeSegment = worktreeName ? `${c.dim}(wt:${worktreeName})${c.reset}` : '';
+
+  // Branch (part of core when repo exists)
+  const branchSegment = (repoName && branch) ? `:${c.blue}${branch}${c.reset}` : '';
+
+  // Optional: subdirectory
+  const subdirSegment = (repoName && subDir) ? ` ${c.dim}${subDir}${c.reset}` : '';
+
+  // Git status (part of core)
+  const gitStatusSegment = gitStatus ? ` ${c.red}${gitStatus}${c.reset}` : '';
+
+  // Optional: diff stats
+  const diffSegment = (linesAdded > 0 || linesRemoved > 0)
+    ? ` | ${c.greenNorm}+${linesAdded}${c.reset}/${c.redNorm}-${linesRemoved}${c.reset}`
+    : '';
+
+  // Build Line 1 with graceful degradation
+  function buildLine1(includeWorktree, includeSubdir, includeDiff) {
+    let s = line1Core;
+    if (includeWorktree) s += worktreeSegment;
+    s += branchSegment;
+    if (includeSubdir) s += subdirSegment;
+    s += gitStatusSegment;
+    if (includeDiff) s += diffSegment;
+    return s;
   }
 
-  // Lines changed
-  if (linesAdded > 0 || linesRemoved > 0) {
-    line1 += ` | ${c.greenNorm}+${linesAdded}${c.reset}/${c.redNorm}-${linesRemoved}${c.reset}`;
+  let line1 = buildLine1(true, true, true);
+  const maxWidth = termWidth - rightPadding;
+  if (visibleLen(line1) > maxWidth) {
+    if (visibleLen(line1) > maxWidth) {
+      line1 = buildLine1(true, true, false);   // drop diff
+    }
+    if (visibleLen(line1) > maxWidth) {
+      line1 = buildLine1(true, false, false);  // drop subdir
+    }
+    if (visibleLen(line1) > maxWidth) {
+      line1 = buildLine1(false, false, false); // drop worktree
+    }
   }
 
   // === Build Line 2: Commit hash + message ===

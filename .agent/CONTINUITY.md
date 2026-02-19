@@ -1,12 +1,12 @@
 # ContextBricks Universal — Continuity
 
-## Project State (2026-02-07)
+## Project State (2026-02-19)
 
-**Version:** 4.2.2 (published on npm)
+**Version:** 4.3.0 (pending publish — commit ready, not yet pushed)
 **Branch:** main (up to date)
 **npm:** https://www.npmjs.com/package/contextbricks-universal
 **GitHub:** https://github.com/thebtf/contextbricks-universal
-**Release:** https://github.com/thebtf/contextbricks-universal/releases/tag/v4.2.2
+**Release:** https://github.com/thebtf/contextbricks-universal/releases/tag/v4.2.3
 
 ## What This Project Does
 
@@ -18,11 +18,18 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 
 ## Architecture
 
-- `scripts/statusline.js` — Main statusline script (~520 lines). Reads JSON from stdin (Claude Code), outputs ANSI-colored lines to stdout.
+- `scripts/statusline.js` — Main statusline script (~535 lines). Reads JSON from stdin (Claude Code), outputs ANSI-colored lines to stdout.
 - `bin/cli.js` — CLI with install/uninstall/test/help commands (~285 lines). Copies statusline.js to ~/.claude/ and configures settings.json.
 - `package.json` — npm package `contextbricks-universal`, bin aliases: `contextbricks` and `contextbricks-universal`. postinstall auto-runs install.
 
 ## Key Technical Decisions
+
+### Git Worktree Detection (v4.2.3)
+- Compares `git rev-parse --git-dir` with `--git-common-dir`
+- If they differ → inside a linked worktree
+- Main repo name derived from `path.dirname(resolvedCommonDir)`
+- Worktree folder name saved and shown as `(wt:name)` indicator
+- Display: `repoName(wt:worktreeName):branch`
 
 ### Rate Limit API
 - **Endpoint:** `GET https://api.anthropic.com/api/oauth/usage`
@@ -51,6 +58,7 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 | `CONTEXTBRICKS_BRICKS` | `30` | Number of bricks |
 | `CONTEXTBRICKS_SHOW_LIMITS` | `1` | Show rate limit line |
 | `CONTEXTBRICKS_RESET_EXACT` | `1` | Exact reset times (`~1d23h` vs `~1d`) |
+| `CONTEXTBRICKS_RIGHT_PADDING` | `0` | Reserve N chars on right of Line 1 for Claude annotations (auto-28 when TERM_PROGRAM=vscode) |
 
 ## PR Review Config
 
@@ -59,8 +67,8 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 ## npm Publishing
 
 - Package name: `contextbricks-universal` (`contextbricks` is taken by jezweb's bash original)
-- Auth: npm granular access token (user runs `npm login` or provides token)
-- Publish: `npm publish --access public` from project root
+- **Publishing goes through GitHub pipeline** (not manual npm publish)
+- **Versioning:** patch changes (last digit) for minor/bug fixes; middle digit for new features
 
 ## Completed Work
 
@@ -71,6 +79,16 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 5. npm publish as `contextbricks-universal`
 6. Cherry-picked Copilot improvements (process.execPath, 1MB limit)
 7. Closed 4 Copilot spam PRs
+8. **Git worktree detection** — shows main repo name + `(wt:name)` indicator (v4.2.3)
+9. **Terminal width adaptation** — dynamic brick count + commit message truncation based on terminal width (v4.2.4)
+10. **Line 1 graceful degradation** — `stripAnsi`/`visibleLen` helpers; CONTEXTBRICKS_RIGHT_PADDING + TERM_PROGRAM=vscode auto-detect (28 chars); drops diff stats → subdir → worktree when Line 1 overflows. Fixes layout break when Claude Code injects `/ide for Visual Studio Code` or context warnings (v4.3.0)
+
+## Fork: everything-claude-code
+
+- **Fork:** `thebtf/everything-claude-code` at `D:\Dev\forks\everything-claude-code`
+- **Goal:** improve continuous learning system based on multi-model consensus analysis
+- **Insights:** `.agent/INSIGHTS.md` — v2 per-tool-call hooks are anti-pattern, v1 session-end approach is better
+- **Status:** Windows compatibility already implemented by previous session; ready for commit/PR
 
 ## Lessons Learned
 
@@ -78,3 +96,7 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 - npm on Windows removes bin entries with `./` prefix during publish — use paths without `./`
 - Gemini and Copilot GitHub Apps never responded to review invocations — may not be installed
 - `spawnSync` in Node.js on Windows needs explicit `windowsHide: true` to avoid console flash
+- `.cjs` extension needed for hooks to avoid ESM conflicts from project-level `"type": "module"` in package.json
+- **npm publishing via GitHub pipeline, not manual tokens**
+- **Patch version (x.x.N) for minor changes, minor version (x.N.0) for features**
+- Git worktree detection: `--git-common-dir` returns shared .git, `--git-dir` returns worktree-specific path

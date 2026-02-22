@@ -1,12 +1,12 @@
 # ContextBricks Universal — Continuity
 
-## Project State (2026-02-22)
+## Project State (2026-02-19)
 
-**Version:** 4.3.1 (pushed f182360 — GitHub pipeline publishing to npm)
+**Version:** 4.3.0 (pending publish — commit ready, not yet pushed)
 **Branch:** main (up to date)
-**npm:** https://www.npmjs.com/package/contextbricks-universal (still shows 4.2.2 — pipeline pending)
-**GitHub:** https://github.com/thebtf/contentbricks-universal
-**Global install:** `npm install -g D:\Dev\contentbricks-universal` → symlinked to local, v4.3.1 active
+**npm:** https://www.npmjs.com/package/contextbricks-universal
+**GitHub:** https://github.com/thebtf/contextbricks-universal
+**Release:** https://github.com/thebtf/contextbricks-universal/releases/tag/v4.2.3
 
 ## What This Project Does
 
@@ -58,7 +58,7 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 | `CONTEXTBRICKS_BRICKS` | `30` | Number of bricks |
 | `CONTEXTBRICKS_SHOW_LIMITS` | `1` | Show rate limit line |
 | `CONTEXTBRICKS_RESET_EXACT` | `1` | Exact reset times (`~1d23h` vs `~1d`) |
-| `CONTEXTBRICKS_RIGHT_PADDING` | `0` | Reserve N chars on right for Claude annotations (auto-28 when TERM_PROGRAM=vscode, auto-100 when context < 15%) |
+| `CONTEXTBRICKS_RIGHT_PADDING` | `0` | Reserve N chars on right of Line 1 for Claude annotations (auto-28 when TERM_PROGRAM=vscode) |
 
 ## PR Review Config
 
@@ -82,7 +82,6 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 8. **Git worktree detection** — shows main repo name + `(wt:name)` indicator (v4.2.3)
 9. **Terminal width adaptation** — dynamic brick count + commit message truncation based on terminal width (v4.2.4)
 10. **Line 1 graceful degradation** — `stripAnsi`/`visibleLen` helpers; CONTEXTBRICKS_RIGHT_PADDING + TERM_PROGRAM=vscode auto-detect (28 chars); drops diff stats → subdir → worktree when Line 1 overflows. Fixes layout break when Claude Code injects `/ide for Visual Studio Code` or context warnings (v4.3.0)
-11. **effectiveWidth for all lines + auto-compact detection** — `effectiveWidth = termWidth - rightPadding` applied to Lines 1-3 (was Line 1 only). Auto-detects "Context left until auto-compact" bar: when `context_window.remaining_percentage < 15%`, adds 100 chars to rightPadding. Fixes layout wrapping of all lines when notification appears. Commit f182360, v4.3.1 (v4.3.0)
 
 ## Fork: everything-claude-code
 

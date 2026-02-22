@@ -307,6 +307,31 @@ function formatRateLimitLine(data) {
   return segments.length > 0 ? segments.join(' | ') : '';
 }
 
+// Detect terminal width via OS command when Node.js APIs unavailable (piped stdout)
+function detectTermWidth() {
+  try {
+    const { execSync } = require('child_process');
+    if (process.platform === 'win32') {
+      const out = execSync('mode con', {
+        encoding: 'utf-8', timeout: 1000, windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const m = out.match(/Columns:\s*(\d+)/);
+      if (m) return parseInt(m[1], 10);
+    } else {
+      const out = execSync('tput cols 2>/dev/null || stty size </dev/tty 2>/dev/null', {
+        encoding: 'utf-8', timeout: 1000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      // tput cols returns just the number; stty size returns "rows cols"
+      const parts = out.trim().split(/\s+/);
+      const n = parseInt(parts[parts.length - 1], 10);
+      if (n > 0) return n;
+    }
+  } catch (_) {}
+  return 0;
+}
+
 // Strip ANSI escape codes to measure visible string length
 function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -344,7 +369,9 @@ function main() {
   // Terminal width for dynamic content sizing (stdout is piped, so columns may be 0/undefined)
   const termWidth = Number(process.env.CONTEXTBRICKS_WIDTH)
     || (process.stdout.columns > 0 ? process.stdout.columns : 0)
+    || (process.stderr.columns > 0 ? process.stderr.columns : 0)
     || Number(process.env.COLUMNS)
+    || detectTermWidth()
     || 80;
 
   // Right-padding: reserve space for Claude Code's right-aligned injections on Line 1
@@ -357,7 +384,7 @@ function main() {
   const remainingPctEarly = Number(getPath(input, 'context_window.remaining_percentage') || 0);
   const usedPctEarly = Number(getPath(input, 'context_window.used_percentage') || 0);
   const contextRemaining = remainingPctEarly || (usedPctEarly > 0 ? 100 - usedPctEarly : 100);
-  const autoCompactPadding = contextRemaining < 15 ? 100 : 0;
+  const autoCompactPadding = contextRemaining <= 30 ? 100 : 0;
   const rightPadding = basePadding + (isVSCode ? 28 : 0) + autoCompactPadding;
   // Effective width available to all statusline lines (accounts for right-side annotations)
   const effectiveWidth = termWidth - rightPadding;
@@ -574,6 +601,23 @@ function main() {
   if (costUsd > 0) {
     const costFormatted = costUsd.toFixed(2);
     brickLine += ` | ${c.yellowNorm}$${costFormatted}${c.reset}`;
+  }
+
+  // Ultra-compact mode: when Claude Code's "auto-compact" notification bar is visible,
+  // it takes ~98 chars on the right, leaving only ~15-20 chars for statusline.
+  // Model and context % are already shown in the notification, so output only
+  // rate limits (the most critical unique info). Context remaining <= 30%
+  // correlates with notification visibility (verified empirically).
+  if (contextRemaining <= 30) {
+    // Rate limits line is the most valuable when context is low
+    const showLimits = process.env.CONTEXTBRICKS_SHOW_LIMITS !== '0';
+    if (showLimits) {
+      const token = readOAuthToken();
+      const usageData = fetchUsageData(token, input);
+      const line4 = formatRateLimitLine(usageData);
+      if (line4) process.stdout.write(line4 + '\n');
+    }
+    return;
   }
 
   // Output all lines

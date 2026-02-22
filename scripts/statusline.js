@@ -351,10 +351,19 @@ function main() {
   // e.g. "/ide for Visual Studio Code" (27 chars + 1 separator = 28)
   const basePadding = Number(process.env.CONTEXTBRICKS_RIGHT_PADDING) || 0;
   const isVSCode = process.env.TERM_PROGRAM === 'vscode';
-  const rightPadding = basePadding + (isVSCode ? 28 : 0);
+  // Auto-detect Claude Code's "Context left until auto-compact" notification bar (~100 chars).
+  // This bar appears on all statusline lines (not just Line 1) when context is low.
+  // Read remaining percentage early from stdin to decide whether to account for it.
+  const remainingPctEarly = Number(getPath(input, 'context_window.remaining_percentage') || 0);
+  const usedPctEarly = Number(getPath(input, 'context_window.used_percentage') || 0);
+  const contextRemaining = remainingPctEarly || (usedPctEarly > 0 ? 100 - usedPctEarly : 100);
+  const autoCompactPadding = contextRemaining < 15 ? 100 : 0;
+  const rightPadding = basePadding + (isVSCode ? 28 : 0) + autoCompactPadding;
+  // Effective width available to all statusline lines (accounts for right-side annotations)
+  const effectiveWidth = termWidth - rightPadding;
 
   // Reserve ~35 chars for bricks stats (" 78% | 44k free | 1h5m | $12.90")
-  const maxAutoBricks = Math.max(5, termWidth - 35);
+  const maxAutoBricks = Math.max(5, effectiveWidth - 35);
   const totalBricks = Math.max(1, Math.min(
     Number(process.env.CONTEXTBRICKS_BRICKS) || 30,
     maxAutoBricks
@@ -467,7 +476,7 @@ function main() {
   }
 
   let line1 = buildLine1(true, true, true);
-  const maxWidth = termWidth - rightPadding;
+  const maxWidth = effectiveWidth;
   if (visibleLen(line1) > maxWidth) {
     if (visibleLen(line1) > maxWidth) {
       line1 = buildLine1(true, true, false);   // drop diff
@@ -486,7 +495,7 @@ function main() {
     line2 += `${c.yellow}[${commitShort}]${c.reset}`;
     if (commitMsg) {
       const hashPrefixLen = commitShort ? commitShort.length + 3 : 0; // "[hash] "
-      const maxMsgLen = Math.max(10, termWidth - hashPrefixLen - 3); // 3 for "..."
+      const maxMsgLen = Math.max(10, effectiveWidth - hashPrefixLen - 3); // 3 for "..."
       const truncatedMsg = commitMsg.length > maxMsgLen ? commitMsg.substring(0, maxMsgLen) + '...' : commitMsg;
       line2 += ` ${truncatedMsg}`;
     }

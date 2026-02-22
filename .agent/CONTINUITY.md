@@ -2,7 +2,7 @@
 
 ## Project State (2026-02-19)
 
-**Version:** 4.3.0 (pending publish — commit ready, not yet pushed)
+**Version:** 4.3.0 (pushed a6f503f — GitHub pipeline publishing to npm)
 **Branch:** main (up to date)
 **npm:** https://www.npmjs.com/package/contextbricks-universal
 **GitHub:** https://github.com/thebtf/contextbricks-universal

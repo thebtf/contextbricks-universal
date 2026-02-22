@@ -1,6 +1,6 @@
 {
   "name": "contextbricks-universal",
-  "version": "4.3.0",
+  "version": "4.3.1",
   "description": "Universal cross-platform statusline for Claude Code CLI with context brick visualization. Windows, Linux, macOS. No bash or jq required.",
   "keywords": [
     "claude",

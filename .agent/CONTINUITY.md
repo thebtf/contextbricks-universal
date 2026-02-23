@@ -1,9 +1,9 @@
 # ContextBricks Universal — Continuity
 
-## Project State (2026-02-19)
+## Project State (2026-02-23)
 
-**Version:** 4.3.0 (pending publish — commit ready, not yet pushed)
-**Branch:** main (up to date)
+**Version:** 4.3.1
+**Branch:** main
 **npm:** https://www.npmjs.com/package/contextbricks-universal
 **GitHub:** https://github.com/thebtf/contextbricks-universal
 **Release:** https://github.com/thebtf/contextbricks-universal/releases/tag/v4.2.3
@@ -82,6 +82,7 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 8. **Git worktree detection** — shows main repo name + `(wt:name)` indicator (v4.2.3)
 9. **Terminal width adaptation** — dynamic brick count + commit message truncation based on terminal width (v4.2.4)
 10. **Line 1 graceful degradation** — `stripAnsi`/`visibleLen` helpers; CONTEXTBRICKS_RIGHT_PADDING + TERM_PROGRAM=vscode auto-detect (28 chars); drops diff stats → subdir → worktree when Line 1 overflows. Fixes layout break when Claude Code injects `/ide for Visual Studio Code` or context warnings (v4.3.0)
+11. **Claude Code footer layout bug investigation** — reverse-engineered cli.js v2.1.50 renderer. Found: ink flexbox with `flexShrink:0` on right column (notifications) squeezes left column (statusline) on narrow terminals. Filed GitHub issue: https://github.com/anthropics/claude-code/issues/27864. Compact mode was implemented then removed — it was a workaround for their bug, not our fix. (v4.3.1)
 
 ## Fork: everything-claude-code
 

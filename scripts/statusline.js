@@ -332,6 +332,11 @@ function main() {
     return;
   }
 
+  // NOTE: Claude Code's footer layout has a bug where the right column (notifications)
+  // uses flexShrink=0 and can squeeze the left column (statusline) on narrow terminals.
+  // Reported: https://github.com/anthropics/claude-code/issues/27864
+  // We always output full statusline — layout issues are Claude Code's responsibility.
+
   // Parse Claude data
   const model = (getPath(input, 'model.display_name') || 'Claude').replace('Claude ', '');
   const currentDir = getPath(input, 'workspace.current_dir') || process.cwd();

@@ -150,6 +150,22 @@ function readOAuthToken() {
   }
 }
 
+// Zero out utilization for limits whose reset time has already passed
+function expireResetLimits(data) {
+  if (!data) return data;
+  const now = Date.now();
+  const result = { ...data };
+  for (const key of ['five_hour', 'seven_day', 'seven_day_sonnet', 'seven_day_opus']) {
+    if (result[key] && result[key].resets_at) {
+      const resetMs = new Date(result[key].resets_at).getTime();
+      if (!isNaN(resetMs) && now > resetMs) {
+        result[key] = { ...result[key], utilization: 0 };
+      }
+    }
+  }
+  return result;
+}
+
 // Fetch usage data from Anthropic API with file-based caching
 function fetchUsageData(token, input) {
   // Check for mock data in input (test mode)
@@ -159,14 +175,22 @@ function fetchUsageData(token, input) {
   if (!token) return null;
 
   const cacheFile = path.join(os.homedir(), '.claude', '.usage-cache.json');
-  const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+  const MAX_STALE_MS = 5 * 60 * 60 * 1000; // 5 hours (matches Anthropic's rolling window)
+  const ERROR_BACKOFF_MS = 3 * 60 * 1000; // 3 minutes
+
+  let staleData = null;
 
   // Try cache first
   try {
     const cacheRaw = fs.readFileSync(cacheFile, 'utf8');
     const cache = JSON.parse(cacheRaw);
-    if (cache.timestamp && (Date.now() - cache.timestamp) < CACHE_TTL_MS) {
-      return cache.data;
+    const age = Date.now() - (cache.timestamp || 0);
+    if (age < MAX_STALE_MS) {
+      staleData = cache.data;
+    }
+    if (age < CACHE_TTL_MS) {
+      return cache.data; // fresh cache
     }
   } catch {
     // no cache or invalid
@@ -229,14 +253,22 @@ function fetchUsageData(token, input) {
       return data;
     }
   } catch {
-    // API call failed — try stale cache
+    // spawnSync failed (timeout, spawn error)
+  }
+
+  // API failed or returned non-200: apply error backoff and return stale data
+  if (staleData) {
+    // Touch cache timestamp to prevent hammering (next retry in ~ERROR_BACKOFF_MS)
     try {
-      const cacheRaw = fs.readFileSync(cacheFile, 'utf8');
-      const cache = JSON.parse(cacheRaw);
-      if (cache.data) return cache.data;
+      const backoffTimestamp = Date.now() - (CACHE_TTL_MS - ERROR_BACKOFF_MS);
+      fs.writeFileSync(cacheFile, JSON.stringify({ timestamp: backoffTimestamp, data: staleData }), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
     } catch {
-      // no stale cache
+      // backoff write failure is non-fatal
     }
+    return expireResetLimits(staleData);
   }
 
   return null;

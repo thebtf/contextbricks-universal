@@ -1,12 +1,12 @@
 # ContextBricks Universal — Continuity
 
-## Project State (2026-02-23)
+## Project State (2026-03-06)
 
-**Version:** 4.3.1
+**Version:** 4.4.0
 **Branch:** main
 **npm:** https://www.npmjs.com/package/contextbricks-universal
 **GitHub:** https://github.com/thebtf/contextbricks-universal
-**Release:** https://github.com/thebtf/contextbricks-universal/releases/tag/v4.2.3
+**Release:** https://github.com/thebtf/contextbricks-universal/releases/tag/v4.4.0
 
 ## What This Project Does
 
@@ -18,7 +18,7 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 
 ## Architecture
 
-- `scripts/statusline.js` — Main statusline script (~535 lines). Reads JSON from stdin (Claude Code), outputs ANSI-colored lines to stdout.
+- `scripts/statusline.js` — Main statusline script (~600 lines). Reads JSON from stdin (Claude Code), outputs ANSI-colored lines to stdout.
 - `bin/cli.js` — CLI with install/uninstall/test/help commands (~285 lines). Copies statusline.js to ~/.claude/ and configures settings.json.
 - `package.json` — npm package `contextbricks-universal`, bin aliases: `contextbricks` and `contextbricks-universal`. postinstall auto-runs install.
 
@@ -36,7 +36,14 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 - **Required header:** `anthropic-beta: oauth-2025-04-20` (CRITICAL — without it, 401)
 - **Auth:** `Authorization: Bearer <token>` from `~/.claude/.credentials.json` (Win/Linux) or macOS keychain
 - **Response fields:** `five_hour`, `seven_day`, `seven_day_sonnet`, `seven_day_opus` (nullable), `extra_usage`
-- **Cache:** `~/.claude/.usage-cache.json`, TTL 5 min, mode 0o600
+- **Cache:** `~/.claude/.usage-cache.json`, TTL 15 min, max stale 5h, error backoff 3 min, mode 0o600
+
+### Stale-While-Error Cache (v4.4.0)
+- When API returns non-200 (429 rate limited, timeout): serves last cached data up to 5 hours old
+- Error backoff: touches cache timestamp to prevent API hammering (3 min between retries)
+- `expireResetLimits()`: zeroes out utilization when `resets_at` has passed (prevents stale high % display)
+- Constants: `CACHE_TTL_MS=15min`, `MAX_STALE_MS=5h`, `ERROR_BACKOFF_MS=3min`
+- Key insight: spawnSync with 429 returns exit 0 + empty stdout (not an exception) — stale fallback must be outside catch block
 
 ### Sync HTTP Fetch
 - `spawnSync(process.execPath, ['-e', httpsScript])` with token via `ANTHROPIC_TOKEN` env var (NOT argv — security)
@@ -81,23 +88,21 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 7. Closed 4 Copilot spam PRs
 8. **Git worktree detection** — shows main repo name + `(wt:name)` indicator (v4.2.3)
 9. **Terminal width adaptation** — dynamic brick count + commit message truncation based on terminal width (v4.2.4)
-10. **Line 1 graceful degradation** — `stripAnsi`/`visibleLen` helpers; CONTEXTBRICKS_RIGHT_PADDING + TERM_PROGRAM=vscode auto-detect (28 chars); drops diff stats → subdir → worktree when Line 1 overflows. Fixes layout break when Claude Code injects `/ide for Visual Studio Code` or context warnings (v4.3.0)
-11. **Claude Code footer layout bug investigation** — reverse-engineered cli.js v2.1.50 renderer. Found: ink flexbox with `flexShrink:0` on right column (notifications) squeezes left column (statusline) on narrow terminals. Filed GitHub issue: https://github.com/anthropics/claude-code/issues/27864. Compact mode was implemented then removed — it was a workaround for their bug, not our fix. (v4.3.1)
+10. **Line 1 graceful degradation** — `stripAnsi`/`visibleLen` helpers; CONTEXTBRICKS_RIGHT_PADDING + TERM_PROGRAM=vscode auto-detect (28 chars); drops diff stats → subdir → worktree when Line 1 overflows. (v4.3.0)
+11. **Claude Code footer layout bug investigation** — reverse-engineered cli.js v2.1.50 renderer. Found: ink flexbox with `flexShrink:0` on right column squeezes left column. Filed GitHub issue #27864. Compact mode removed — their bug, not our fix. (v4.3.1)
+12. **Stale-while-error cache** — Line 4 disappearing on API 429. TTL 5→15 min, stale fallback up to 5h, 3 min error backoff, `expireResetLimits` zeroes out past resets. Multi-model consensus (gemini thinkdeep + planner + architect + claude reviewer). (v4.4.0)
 
-## Fork: everything-claude-code
+## Upstream Issues
 
-- **Fork:** `thebtf/everything-claude-code` at `D:\Dev\forks\everything-claude-code`
-- **Goal:** improve continuous learning system based on multi-model consensus analysis
-- **Insights:** `.agent/INSIGHTS.md` — v2 per-tool-call hooks are anti-pattern, v1 session-end approach is better
-- **Status:** Windows compatibility already implemented by previous session; ready for commit/PR
+- **#27864** (anthropics/claude-code) — Footer layout: notification bar squeezes statusline. OPEN, 0 comments.
 
 ## Lessons Learned
 
 - `anthropic-beta: oauth-2025-04-20` header is required for OAuth usage API — not documented anywhere official
 - npm on Windows removes bin entries with `./` prefix during publish — use paths without `./`
-- Gemini and Copilot GitHub Apps never responded to review invocations — may not be installed
 - `spawnSync` in Node.js on Windows needs explicit `windowsHide: true` to avoid console flash
 - `.cjs` extension needed for hooks to avoid ESM conflicts from project-level `"type": "module"` in package.json
 - **npm publishing via GitHub pipeline, not manual tokens**
 - **Patch version (x.x.N) for minor changes, minor version (x.N.0) for features**
 - Git worktree detection: `--git-common-dir` returns shared .git, `--git-dir` returns worktree-specific path
+- **API 429 with spawnSync: exit code 0 + empty stdout, NOT an exception** — stale fallback logic must be outside catch block

@@ -235,6 +235,18 @@ function test() {
       },
       organization: { organization_type: 'claude_max' },
     },
+    _mock_cache_fix: {
+      q5h: 0.17,
+      q7d: 0.51,
+      q5h_reset: Math.floor((now + 22 * 60000) / 1000),
+      q7d_reset: Math.floor((now + 2 * 86400000) / 1000),
+      qoverage: '',
+      ts: new Date(now).toISOString(),
+      _extras: {
+        cache: { ttl_tier: '1h', hit_rate: '98', cache_creation: 1900, cache_read: 135000 },
+        peak_hour: false,
+      },
+    },
   });
 
   const result = spawnSync(process.execPath, [STATUSLINE_SCRIPT], {

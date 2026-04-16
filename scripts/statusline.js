@@ -469,25 +469,33 @@ function mergeRateData(oauthData, cfData) {
     },
   };
 
-  // Reference time for burn-rate computation. Prefer cache-fix's own ts
-  // (the interceptor's last write) so freshness matches the data.
+  // Two distinct clocks:
+  // - nowMs: anchor for burn-rate computation. Prefers cache-fix's own `ts`
+  //   (when the interceptor last wrote) so rate reflects the utilization %
+  //   at the moment of measurement rather than extrapolating with real-time.
+  // - realNowMs: wall-clock used for reset-expiry gating. Using nowMs here
+  //   would let stale cfData (old `ts`) win even when the reset window has
+  //   already rolled over since that write.
   const nowMs = (cfData && cfData.ts)
     ? (new Date(cfData.ts).getTime() || Date.now())
     : Date.now();
+  const realNowMs = Date.now();
 
-  // 5h — prefer cache-fix, fall back to OAuth
-  if (cfData && Number(cfData.q5h_reset) > 0) {
+  // 5h — prefer cache-fix only when its reset timestamp is still in the future
+  // (expired cfData means the window rolled over; OAuth with expireResetLimits
+  //  will show the actual 0% for the new window, which is more accurate).
+  const cf5hResetMs = cfData ? Number(cfData.q5h_reset) * 1000 : 0;
+  if (cfData && cf5hResetMs > realNowMs) {
     const pct = Math.floor((Number(cfData.q5h) || 0) * 100);
-    const resetMs = Number(cfData.q5h_reset) * 1000;
     let burn = '';
     if (pct > 0) {
-      const windowStart = resetMs - 5 * 3600 * 1000;
+      const windowStart = cf5hResetMs - 5 * 3600 * 1000;
       const elapsedMin = (nowMs - windowStart) / 60000;
       if (elapsedMin > 1) burn = `+${(pct / elapsedMin).toFixed(1)}/m`;
     }
     out.five_hour = {
       utilization: pct,
-      resets_at: new Date(resetMs).toISOString(),
+      resets_at: new Date(cf5hResetMs).toISOString(),
       burn,
     };
   } else if (oauthData && oauthData.five_hour) {
@@ -498,19 +506,19 @@ function mergeRateData(oauthData, cfData) {
     };
   }
 
-  // 7d — same priority
-  if (cfData && Number(cfData.q7d_reset) > 0) {
+  // 7d — same priority (future-reset gate against wall-clock, not cfData.ts)
+  const cf7dResetMs = cfData ? Number(cfData.q7d_reset) * 1000 : 0;
+  if (cfData && cf7dResetMs > realNowMs) {
     const pct = Math.floor((Number(cfData.q7d) || 0) * 100);
-    const resetMs = Number(cfData.q7d_reset) * 1000;
     let burn = '';
     if (pct > 0) {
-      const windowStart = resetMs - 7 * 86400 * 1000;
+      const windowStart = cf7dResetMs - 7 * 86400 * 1000;
       const elapsedMin = (nowMs - windowStart) / 60000;
       if (elapsedMin > 1) burn = `+${(pct / (elapsedMin / 60)).toFixed(1)}/hr`;
     }
     out.seven_day = {
       utilization: pct,
-      resets_at: new Date(resetMs).toISOString(),
+      resets_at: new Date(cf7dResetMs).toISOString(),
       burn,
     };
   } else if (oauthData && oauthData.seven_day) {
@@ -669,8 +677,14 @@ function readQuotaStatusExtras(qsPath) {
 // Detect claude-code-cache-fix / claude-code-meter output and return latest record.
 // Primary source: ~/.claude/claude-meter.jsonl (last line).
 // Fallback: ~/.claude/quota-status.json (written by cache-fix interceptor).
-// Returns null when neither file is readable — indicator stays hidden.
-function readCacheFixQuota() {
+// Tests: `_mock_cache_fix` on stdin short-circuits file I/O with a deterministic
+// payload matching the { q5h, q7d, q5h_reset, q7d_reset, qoverage, ts, _extras }
+// shape, enabling coverage of 5m/PEAK/OVERAGE branches without a live file.
+// Returns null when neither source is available — indicator stays hidden.
+function readCacheFixQuota(input) {
+  const mock = getPath(input, '_mock_cache_fix');
+  if (mock) return mock;
+
   const home = os.homedir();
   const jsonlPath = path.join(home, '.claude', 'claude-meter.jsonl');
   const qsPath = path.join(home, '.claude', 'quota-status.json');
@@ -1024,7 +1038,7 @@ function main() {
   if (showLimits) {
     const oauthData = fetchUsageData(oauthToken, input);
     const useCacheFix = process.env.CONTEXTBRICKS_SHOW_CACHE_FIX !== '0';
-    const cfData = useCacheFix ? readCacheFixQuota() : null;
+    const cfData = useCacheFix ? readCacheFixQuota(input) : null;
     const merged = mergeRateData(oauthData, cfData);
     const line4 = formatRateLimitLine(merged, termWidth);
     if (line4) {

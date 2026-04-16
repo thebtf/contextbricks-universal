@@ -95,7 +95,7 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 | `CONTEXTBRICKS_SHOW_DIR` | `1` | Show current subdirectory |
 | `CONTEXTBRICKS_BRICKS` | `30` | Number of bricks |
 | `CONTEXTBRICKS_SHOW_LIMITS` | `1` | Show rate limit line |
-| `CONTEXTBRICKS_SHOW_CACHE_FIX` | `1` | Show `claude-code-cache-fix` indicator (Line 5) |
+| `CONTEXTBRICKS_SHOW_CACHE_FIX` | `1` | Merge `claude-code-cache-fix` data into Line 4 (`0` → ignore, use OAuth only). Line 5 was removed in v4.5.0. |
 | `CONTEXTBRICKS_RESET_EXACT` | `1` | Exact reset times (`~1d23h` vs `~1d`) |
 | `CONTEXTBRICKS_RIGHT_PADDING` | `0` | Reserve N chars on right of Line 1 for Claude annotations (auto-28 when TERM_PROGRAM=vscode) |
 
@@ -129,7 +129,7 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 
 ## Deferred / Open
 
-- **npm release v4.5.0**: commit on main is unpushed. Publishing goes through GitHub pipeline. Action: `git push origin main` → tag v4.5.0 → GitHub release notes → pipeline auto-publishes.
+- **npm release v4.5.0**: branch `feat/v4.5.0-quota-merge-and-ui-polish` pushed, PR #7 open. There is NO auto-publish pipeline (see npm Publishing section). Action after PR merge: tag `v4.5.0` → `gh release create` → run `npm publish` manually with owner credentials (or first land `.github/workflows/release.yml` as a separate PR).
 - **Test expansion for cache-fix branches**: `contextbricks test` uses static mock OAuth data but no cache-fix mock — live testing piggy-backs on the real `~/.claude/quota-status.json`. TTL:5m red branch + idle-rebuild warning + PEAK (yellow) + OVERAGE + degradation-order under narrow widths are not covered by automated test mocks. Add an `_mock_cache_fix` field to the test fixture so `contextbricks test` can exercise every branch deterministically.
 - **Line 4/5 duplication → resolved in v4.5.0**: Line 5 removed; 5h/7d now pulled from cache-fix when available, falling back to OAuth. No action needed.
 - **MEMORY.md snapshot**: auto-memory at `~/.claude/projects/D--Dev-contentbricks-universal/memory/MEMORY.md` updated to v4.5.0; a 41-day-old system-reminder flagged the file as stale — future sessions should trust CONTINUITY.md over MEMORY.md for current version.

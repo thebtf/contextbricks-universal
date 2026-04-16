@@ -106,7 +106,8 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 ## npm Publishing
 
 - Package name: `contextbricks-universal` (`contextbricks` is taken by jezweb's bash original)
-- **Publishing goes through GitHub pipeline** (not manual npm publish)
+- **Release state (verified 2026-04-16):** no `.github/workflows/` — there is NO auto-publish pipeline. Previous note claiming "publishing through GitHub pipeline" was incorrect; `gh release create` has been run manually but `npm publish` has NOT been run since `v4.2.2` (npm latest = `4.2.2` while GH releases go up to `v4.4.0`).
+- **Consequence:** npm users are stuck two minor versions behind GH releases. Publishing `v4.5.0` to npm requires a manual `npm publish` with owner credentials, OR adding a `.github/workflows/release.yml` that triggers on tag push.
 - **Versioning:** patch changes (last digit) for minor/bug fixes; middle digit for new features
 
 ## Completed Work

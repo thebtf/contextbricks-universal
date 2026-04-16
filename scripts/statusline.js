@@ -5,16 +5,18 @@
 // Line 1: Model | Repo:Branch [subdir] | git status | lines changed
 // Line 2: [commit] commit message
 // Line 3: Context bricks | percentage | free | duration | cost
-// Line 4: Rate limit utilization (5h, 7d Sonnet, 7d Opus) — Max/Pro subscribers
-// Line 5: claude-code-cache-fix quota indicator (Q5h/Q7d burn rates, TTL tier,
-//         cache hit rate, PEAK, OVERAGE) — auto-detected when data file exists
+// Line 4: Unified rate-limit line — merges Anthropic OAuth usage (authoritative
+//         for sub-limits) with claude-code-cache-fix data (fresher 5h/7d
+//         utilization + burn rates + TTL tier + cache hit rate + PEAK/OVERAGE).
+//         Cache-fix data is auto-detected via ~/.claude/claude-meter.jsonl or
+//         ~/.claude/quota-status.json and takes priority for 5h/7d segments.
 //
 // Configuration via environment variables:
 //   CONTEXTBRICKS_SHOW_DIR=1     Show current subdirectory (default: 1)
 //   CONTEXTBRICKS_SHOW_DIR=0     Hide subdirectory
 //   CONTEXTBRICKS_BRICKS=40      Number of bricks (default: 30)
-//   CONTEXTBRICKS_SHOW_LIMITS=0  Hide rate limit line (default: shown)
-//   CONTEXTBRICKS_SHOW_CACHE_FIX=0  Hide claude-code-cache-fix line (default: shown)
+//   CONTEXTBRICKS_SHOW_LIMITS=0  Hide rate-limit line (default: shown)
+//   CONTEXTBRICKS_SHOW_CACHE_FIX=0  Ignore cache-fix data, use OAuth only (default: merge)
 //   CONTEXTBRICKS_RESET_EXACT=0  Approximate reset times (default: exact)
 //   CONTEXTBRICKS_RIGHT_PADDING=28  Reserve N chars on right of Line 1 for Claude annotations
 //                                   (auto-set to 28 when TERM_PROGRAM=vscode)
@@ -318,28 +320,221 @@ function formatResetTime(isoStr, exact) {
   }
 }
 
-// Build a single rate limit segment like "5h:23% ~1h30m"
-function buildLimitSegment(data, key, label, exact) {
-  const pct = getPath(data, `${key}.utilization`);
-  if (pct == null) return null;
+// Build a single rate-limit segment like "5h:23% +0.2/m ~1h30m".
+// entry: { utilization, resets_at, burn } — burn is optional like "+0.2/m" or "+1.7/hr"
+function buildLimitSegment(entry, label, exact) {
+  if (!entry || entry.utilization == null) return null;
+  const pct = Number(entry.utilization);
   const color = getColorForUtilization(pct);
-  const resetStr = formatResetTime(getPath(data, `${key}.resets_at`), exact);
+  const resetStr = formatResetTime(entry.resets_at, exact);
   let segment = `${c.dimWhite}${label}:${c.reset}${color}${Math.round(pct)}%${c.reset}`;
+  if (entry.burn) segment += ` ${c.dim}${entry.burn}${c.reset}`;
   if (resetStr) segment += ` ${c.dim}~${resetStr}${c.reset}`;
   return segment;
 }
 
-// Assemble rate limit Line 4 from usage data
-function formatRateLimitLine(data) {
-  if (!data) return '';
-  const exact = process.env.CONTEXTBRICKS_RESET_EXACT !== '0'; // default: exact
-  const segments = [
-    buildLimitSegment(data, 'five_hour', '5h', exact),
-    buildLimitSegment(data, 'seven_day', '7d', exact),
-    buildLimitSegment(data, 'seven_day_sonnet', 'sonnet', exact),
-    buildLimitSegment(data, 'seven_day_opus', 'opus', exact),
-  ].filter(Boolean);
-  return segments.length > 0 ? segments.join(' | ') : '';
+// Merge OAuth usage data (authoritative for sub-limits) with cache-fix data
+// (fresher source for 5h/7d + burn rates + TTL/cache extras).
+// Returns a normalized structure:
+//   { five_hour, seven_day, seven_day_sonnet, seven_day_opus, extras }
+// where each limit is { utilization (0-100), resets_at (ISO), burn (string) }
+function mergeRateData(oauthData, cfData) {
+  const out = {
+    five_hour: null,
+    seven_day: null,
+    seven_day_sonnet: null,
+    seven_day_opus: null,
+    extras: {
+      ttl: null,
+      hit: null,
+      cacheCreation: 0,
+      cacheRead: 0,
+      peak: false,
+      overage: '',
+    },
+  };
+
+  // Reference time for burn-rate computation. Prefer cache-fix's own ts
+  // (the interceptor's last write) so freshness matches the data.
+  const nowMs = (cfData && cfData.ts)
+    ? (new Date(cfData.ts).getTime() || Date.now())
+    : Date.now();
+
+  // 5h — prefer cache-fix, fall back to OAuth
+  if (cfData && Number(cfData.q5h_reset) > 0) {
+    const pct = Math.floor((Number(cfData.q5h) || 0) * 100);
+    const resetMs = Number(cfData.q5h_reset) * 1000;
+    let burn = '';
+    if (pct > 0) {
+      const windowStart = resetMs - 5 * 3600 * 1000;
+      const elapsedMin = (nowMs - windowStart) / 60000;
+      if (elapsedMin > 1) burn = `+${(pct / elapsedMin).toFixed(1)}/m`;
+    }
+    out.five_hour = {
+      utilization: pct,
+      resets_at: new Date(resetMs).toISOString(),
+      burn,
+    };
+  } else if (oauthData && oauthData.five_hour) {
+    out.five_hour = {
+      utilization: oauthData.five_hour.utilization,
+      resets_at: oauthData.five_hour.resets_at,
+      burn: '',
+    };
+  }
+
+  // 7d — same priority
+  if (cfData && Number(cfData.q7d_reset) > 0) {
+    const pct = Math.floor((Number(cfData.q7d) || 0) * 100);
+    const resetMs = Number(cfData.q7d_reset) * 1000;
+    let burn = '';
+    if (pct > 0) {
+      const windowStart = resetMs - 7 * 86400 * 1000;
+      const elapsedMin = (nowMs - windowStart) / 60000;
+      if (elapsedMin > 1) burn = `+${(pct / (elapsedMin / 60)).toFixed(1)}/hr`;
+    }
+    out.seven_day = {
+      utilization: pct,
+      resets_at: new Date(resetMs).toISOString(),
+      burn,
+    };
+  } else if (oauthData && oauthData.seven_day) {
+    out.seven_day = {
+      utilization: oauthData.seven_day.utilization,
+      resets_at: oauthData.seven_day.resets_at,
+      burn: '',
+    };
+  }
+
+  // Sub-limits — OAuth-only (unified cache-fix headers have no per-model breakdown)
+  if (oauthData) {
+    if (oauthData.seven_day_sonnet) {
+      out.seven_day_sonnet = {
+        utilization: oauthData.seven_day_sonnet.utilization,
+        resets_at: oauthData.seven_day_sonnet.resets_at,
+        burn: '',
+      };
+    }
+    if (oauthData.seven_day_opus) {
+      out.seven_day_opus = {
+        utilization: oauthData.seven_day_opus.utilization,
+        resets_at: oauthData.seven_day_opus.resets_at,
+        burn: '',
+      };
+    }
+  }
+
+  // Cache-fix extras
+  if (cfData) {
+    const ex = cfData._extras || { cache: {}, peak_hour: false };
+    const cache = ex.cache || {};
+    out.extras.ttl = cache.ttl_tier || null;
+    out.extras.hit = (cache.hit_rate != null && cache.hit_rate !== '' && cache.hit_rate !== 'N/A')
+      ? cache.hit_rate
+      : null;
+    out.extras.cacheCreation = Number(cache.cache_creation) || 0;
+    out.extras.cacheRead = Number(cache.cache_read) || 0;
+    out.extras.peak = Boolean(ex.peak_hour);
+    out.extras.overage = cfData.qoverage || '';
+  }
+
+  return out;
+}
+
+// Build the cache-fix extras tail ("| TTL:1h 98% | PEAK | OVERAGE").
+// Flags control graceful degradation.
+function buildExtrasTail(extras, flags) {
+  if (!extras) return '';
+  const { includeTTL = true, includeIdleWarning = true, includeHit = true,
+    includePeak = true, includeOverage = true } = flags;
+  let tail = '';
+
+  if (extras.overage === 'active' && includeOverage) {
+    tail += ' | OVERAGE';
+  }
+
+  if (extras.ttl && includeTTL) {
+    if (extras.ttl === '5m') {
+      tail += ` | \x1b[31mTTL:5m\x1b[0m`;
+      if (includeIdleWarning) {
+        const prefix = extras.cacheCreation + extras.cacheRead;
+        if (prefix > 0) {
+          const warn = prefix >= 1_000_000
+            ? `${(prefix / 1_000_000).toFixed(1)}M`
+            : `${Math.round(prefix / 1000)}K`;
+          tail += ` \x1b[31m\u26A0 idle >5m = ${warn} rebuild\x1b[0m`;
+        }
+      }
+    } else {
+      tail += ` | ${c.dimWhite}TTL:${c.reset}${extras.ttl}`;
+    }
+    if (extras.hit && includeHit) tail += ` ${c.dim}${extras.hit}%${c.reset}`;
+  }
+
+  if (extras.peak && includePeak) {
+    tail += ` | \x1b[33mPEAK\x1b[0m`;
+  }
+
+  return tail;
+}
+
+// Assemble the unified rate-limit Line 4 with graceful degradation.
+// Keeps at minimum: 5h:X% | 7d:X% (or whichever is available).
+function formatRateLimitLine(merged, termWidth) {
+  if (!merged) return '';
+  const exact = process.env.CONTEXTBRICKS_RESET_EXACT !== '0';
+  const maxWidth = Math.max(40, termWidth || 80);
+
+  function build(opts) {
+    const {
+      includeBurn = true,
+      includeSubLimits = true,
+      includeTTL = true,
+      includeIdleWarning = true,
+      includeHit = true,
+      includePeak = true,
+      includeOverage = true,
+    } = opts;
+
+    const toSeg = (entry, label) => {
+      if (!entry) return null;
+      const e = includeBurn ? entry : { ...entry, burn: '' };
+      return buildLimitSegment(e, label, exact);
+    };
+
+    const segs = [
+      toSeg(merged.five_hour, '5h'),
+      toSeg(merged.seven_day, '7d'),
+    ];
+    if (includeSubLimits) {
+      segs.push(toSeg(merged.seven_day_sonnet, 'sonnet'));
+      segs.push(toSeg(merged.seven_day_opus, 'opus'));
+    }
+    let line = segs.filter(Boolean).join(' | ');
+    line += buildExtrasTail(merged.extras, {
+      includeTTL, includeIdleWarning, includeHit, includePeak, includeOverage,
+    });
+    return line;
+  }
+
+  // Degradation chain: widest → narrowest
+  const fallbacks = [
+    { },                                                // full
+    { includeIdleWarning: false },                      // drop idle-warning text
+    { includeIdleWarning: false, includeHit: false },   // drop cache hit rate
+    { includeIdleWarning: false, includeHit: false, includeBurn: false },  // drop burn rates
+    { includeIdleWarning: false, includeHit: false, includeBurn: false, includePeak: false },
+    { includeIdleWarning: false, includeHit: false, includeBurn: false, includePeak: false, includeOverage: false },
+    { includeIdleWarning: false, includeHit: false, includeBurn: false, includePeak: false, includeOverage: false, includeTTL: false },
+    { includeIdleWarning: false, includeHit: false, includeBurn: false, includePeak: false, includeOverage: false, includeTTL: false, includeSubLimits: false },
+  ];
+
+  let line = '';
+  for (const opts of fallbacks) {
+    line = build(opts);
+    if (visibleLen(line) <= maxWidth) return line;
+  }
+  return line; // return narrowest even if still over
 }
 
 // Read extras (cache tier, hit rate, peak_hour) from quota-status.json if present
@@ -415,84 +610,6 @@ function readCacheFixQuota() {
   } catch {
     return null;
   }
-}
-
-// Format cache-fix indicator line. Mirrors quota-statusline.sh output:
-//   Q5h: N% (+X.X%/m) | Q7d: N% (+X.X%/hr) [| OVERAGE] [| TTL:5m ⚠ idle >5m = KR rebuild] [HH%] [| PEAK]
-function formatCacheFixLine(rec) {
-  if (!rec) return '';
-
-  const q5hRaw = Number(rec.q5h);
-  const q7dRaw = Number(rec.q7d);
-  if (!isFinite(q5hRaw) && !isFinite(q7dRaw)) return '';
-
-  const q5h = Math.floor((isFinite(q5hRaw) ? q5hRaw : 0) * 100);
-  const q7d = Math.floor((isFinite(q7dRaw) ? q7dRaw : 0) * 100);
-  const overage = rec.qoverage || '';
-  const q5hReset = Number(rec.q5h_reset) || 0;
-  const q7dReset = Number(rec.q7d_reset) || 0;
-
-  const nowMs = rec.ts ? new Date(rec.ts).getTime() : Date.now();
-  const now = isFinite(nowMs) ? nowMs : Date.now();
-
-  // Q5h burn rate: %/min since window start (reset - 5h)
-  let rate5 = '';
-  if (q5hReset > 0 && q5h > 0) {
-    const windowStartMs = q5hReset * 1000 - 5 * 3600 * 1000;
-    const elapsedMin = (now - windowStartMs) / 60000;
-    if (elapsedMin > 1) {
-      const v = q5h / elapsedMin;
-      rate5 = (v >= 0 ? '+' : '') + v.toFixed(1);
-    }
-  }
-
-  // Q7d burn rate: %/hr since window start (reset - 7d)
-  let rate7 = '';
-  if (q7dReset > 0 && q7d > 0) {
-    const windowStartMs = q7dReset * 1000 - 7 * 86400 * 1000;
-    const elapsedMin = (now - windowStartMs) / 60000;
-    if (elapsedMin > 1) {
-      const v = q7d / (elapsedMin / 60);
-      rate7 = (v >= 0 ? '+' : '') + v.toFixed(1);
-    }
-  }
-
-  let label = `${c.dim}[cfx]${c.reset} Q5h: ${q5h}%`;
-  if (rate5) label += ` (${rate5}%/m)`;
-  label += ` | Q7d: ${q7d}%`;
-  if (rate7) label += ` (${rate7}%/hr)`;
-  if (overage === 'active') label += ' | OVERAGE';
-
-  const extras = rec._extras || { cache: {}, peak_hour: false };
-  const cache = extras.cache || {};
-  const ttl = cache.ttl_tier || '';
-  const hit = cache.hit_rate;
-
-  if (ttl) {
-    if (ttl === '5m') {
-      label += ` | \x1b[31mTTL:5m\x1b[0m`;
-      const cacheCr = Number(cache.cache_creation) || 0;
-      const cacheRd = Number(cache.cache_read) || 0;
-      const prefix = cacheCr + cacheRd;
-      if (prefix > 0) {
-        if (prefix >= 1_000_000) {
-          label += ` \x1b[31m\u26A0 idle >5m = ${(prefix / 1_000_000).toFixed(1)}M rebuild\x1b[0m`;
-        } else {
-          label += ` \x1b[31m\u26A0 idle >5m = ${Math.round(prefix / 1000)}K rebuild\x1b[0m`;
-        }
-      }
-    } else {
-      label += ` | TTL:${ttl}`;
-    }
-  }
-  if (hit != null && hit !== '' && hit !== 'N/A') {
-    label += ` ${hit}%`;
-  }
-  if (extras.peak_hour) {
-    label += ` | \x1b[33mPEAK\x1b[0m`;
-  }
-
-  return label;
 }
 
 // Strip ANSI escape codes to measure visible string length
@@ -767,24 +884,17 @@ function main() {
   }
   process.stdout.write(brickLine + '\n');
 
-  // Line 4: Rate limit utilization
+  // Line 4: Unified rate-limit line (OAuth + cache-fix merge)
   const showLimits = process.env.CONTEXTBRICKS_SHOW_LIMITS !== '0';
   if (showLimits) {
     const token = readOAuthToken();
-    const usageData = fetchUsageData(token, input);
-    const line4 = formatRateLimitLine(usageData);
+    const oauthData = fetchUsageData(token, input);
+    const useCacheFix = process.env.CONTEXTBRICKS_SHOW_CACHE_FIX !== '0';
+    const cfData = useCacheFix ? readCacheFixQuota() : null;
+    const merged = mergeRateData(oauthData, cfData);
+    const line4 = formatRateLimitLine(merged, termWidth);
     if (line4) {
       process.stdout.write(line4 + '\n');
-    }
-  }
-
-  // Line 5: claude-code-cache-fix indicator (auto-detected via data file presence)
-  const showCacheFix = process.env.CONTEXTBRICKS_SHOW_CACHE_FIX !== '0';
-  if (showCacheFix) {
-    const cfData = readCacheFixQuota();
-    const line5 = formatCacheFixLine(cfData);
-    if (line5) {
-      process.stdout.write(line5 + '\n');
     }
   }
 }

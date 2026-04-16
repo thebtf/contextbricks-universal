@@ -22,7 +22,7 @@
 - **Official percentage fields** (Claude Code 2.1.6+) with fallback calculation (2.0.70+)
 - **Git integration** — repo, branch, commit hash, message, dirty/ahead/behind indicators
 - **Session metrics** — model name, lines changed, duration, cost (hidden for Max subscribers)
-- **claude-code-cache-fix auto-detection** — burn rates, TTL tier, cache hit rate, PEAK/OVERAGE (Line 5)
+- **claude-code-cache-fix merge** — Line 4 auto-merges OAuth usage with fresher cache-fix data: burn rates (`+0.2/m`, `+1.7/hr`), TTL tier, cache hit rate, PEAK, OVERAGE
 - **Environment config** — `CONTEXTBRICKS_SHOW_DIR`, `CONTEXTBRICKS_BRICKS`, `CONTEXTBRICKS_SHOW_LIMITS`, `CONTEXTBRICKS_SHOW_CACHE_FIX`
 
 ## Installation
@@ -90,21 +90,21 @@ contextbricks install
 [■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87
 ```
 
-### Line 4 — Rate Limits (Max/Pro subscribers)
+### Line 4 — Unified Rate Limits (Max/Pro subscribers + optional cache-fix merge)
+
+Baseline (OAuth only):
 
 ```
 5h:64% ~23m | 7d:57% ~1d23h | sonnet:9% ~3d23h
 ```
 
-### Line 5 — claude-code-cache-fix Indicator (auto-detected)
-
-When [`claude-code-cache-fix`](https://www.npmjs.com/package/claude-code-cache-fix) or `claude-code-meter` is installed, Line 5 appears automatically with complementary quota data:
+When [`claude-code-cache-fix`](https://www.npmjs.com/package/claude-code-cache-fix) or `claude-code-meter` is also installed, Line 4 auto-merges its fresher per-request data for 5h/7d utilization + burn rates + TTL/cache extras (OAuth is still queried for `sonnet`/`opus` sub-limits, which the unified cache-fix headers don't expose):
 
 ```
-[cfx] Q5h: 23% (+1.2%/m) | Q7d: 45% (+0.3%/hr) | TTL:1h 87% | PEAK
+5h:17% +0.2/m ~22m | 7d:51% +1.7/hr ~1d23h | sonnet:9% ~3d23h | TTL:1h 99% | PEAK
 ```
 
-Displayed when `~/.claude/claude-meter.jsonl` or `~/.claude/quota-status.json` exists.
+Auto-detected via `~/.claude/claude-meter.jsonl` or `~/.claude/quota-status.json`.
 
 | Symbol | Meaning |
 |--------|---------|
@@ -115,17 +115,17 @@ Displayed when `~/.claude/claude-meter.jsonl` or `~/.claude/quota-status.json` e
 | `↓2` | Behind remote by 2 |
 | `5h:X%` | 5-hour rolling limit utilization |
 | `7d:X%` | 7-day overall limit utilization |
-| `sonnet:X%` | 7-day Sonnet sub-limit (if applicable) |
-| `opus:X%` | 7-day Opus sub-limit (if applicable) |
+| `+0.2/m`, `+1.7/hr` | Burn rate since window start (cache-fix only) |
+| `sonnet:X%` | 7-day Sonnet sub-limit (OAuth only) |
+| `opus:X%` | 7-day Opus sub-limit (OAuth only) |
 | `~22m` / `~1d23h` | Time until limit resets (exact by default) |
-| `[cfx]` | Line 5 marker — data from `claude-code-cache-fix` |
-| `Q5h:N% (+X/m)` | 5-hour utilization with burn rate (%/min) |
-| `Q7d:N% (+X/hr)` | 7-day utilization with burn rate (%/hr) |
-| `TTL:5m` / `TTL:1h` | Prompt-cache TTL tier currently served by Anthropic |
+| `TTL:5m` (red) / `TTL:1h` | Prompt-cache TTL tier currently served by Anthropic |
 | `⚠ idle >5m = NK rebuild` | Cold-rebuild cost warning when on 5m tier |
 | `NN%` (after TTL) | Cache hit rate |
 | `PEAK` (yellow) | Peak-hour window |
 | `OVERAGE` | Overage billing active |
+
+Graceful degradation on narrow terminals: drops idle-warning → hit rate → burn rates → `PEAK` → `OVERAGE` → `TTL` extras → sub-limits, in that order. Minimum shown: `5h:X% | 7d:X%`.
 
 ## Configuration
 
@@ -134,7 +134,7 @@ Displayed when `~/.claude/claude-meter.jsonl` or `~/.claude/quota-status.json` e
 | `CONTEXTBRICKS_SHOW_DIR` | `1` | Show current subdirectory (`0` to hide) |
 | `CONTEXTBRICKS_BRICKS` | `30` | Number of bricks in the visualization |
 | `CONTEXTBRICKS_SHOW_LIMITS` | `1` | Show rate limit utilization (`0` to hide) |
-| `CONTEXTBRICKS_SHOW_CACHE_FIX` | `1` | Show `claude-code-cache-fix` indicator (`0` to hide) |
+| `CONTEXTBRICKS_SHOW_CACHE_FIX` | `1` | Merge `claude-code-cache-fix` data into Line 4 (`0` to ignore, use OAuth only) |
 | `CONTEXTBRICKS_RESET_EXACT` | `1` | Exact reset times `~1d23h` (`0` for approximate `~1d`) |
 
 ## How It Works

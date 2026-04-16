@@ -8,10 +8,10 @@
 **Works on Windows, Linux, and macOS** — pure Node.js, no bash or jq required.
 
 ```
-[Sonnet 4.5] claude-skills:main *↑2 | +145/-23
+[Opus 4.6 (1m)] claude-skills:main *↑2 | +145/-23 @derailed13
 [5f2ce67] Remove auth-js skill
 [■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87
-5h:64% ~23m | 7d:57% ~1d23h | sonnet:9% ~3d23h
+5h:17% +0.2/m ~22m | 7d:51% +1.7/hr ~1d23h | sonnet:9% ~3d23h | TTL:1h 99%
 ```
 
 ## Features
@@ -21,6 +21,8 @@
 - **Color gradient** — 256-color green-to-red scale based on utilization percentage
 - **Official percentage fields** (Claude Code 2.1.6+) with fallback calculation (2.0.70+)
 - **Git integration** — repo, branch, commit hash, message, dirty/ahead/behind indicators
+- **OAuth account identifier** — auto-fetched `@username` / `@email` / `@display_name` tail on Line 1 (24h cache)
+- **Compact model label** — `(1M context)` shortened to `(1m)` for less visual noise
 - **Session metrics** — model name, lines changed, duration, cost (hidden for Max subscribers)
 - **claude-code-cache-fix merge** — Line 4 auto-merges OAuth usage with fresher cache-fix data: burn rates (`+0.2/m`, `+1.7/hr`), TTL tier, cache hit rate, PEAK, OVERAGE
 - **Environment config** — `CONTEXTBRICKS_SHOW_DIR`, `CONTEXTBRICKS_BRICKS`, `CONTEXTBRICKS_SHOW_LIMITS`, `CONTEXTBRICKS_SHOW_CACHE_FIX`
@@ -72,11 +74,22 @@ contextbricks install
 
 ## Display Layout
 
-### Line 1 — Model + Git + Changes
+### Line 1 — Model + Git + Changes + OAuth Account
 
 ```
-[Sonnet 4.5] claude-skills:main *↑2 | +145/-23
+[Opus 4.6 (1m)] claude-skills:main *↑2 | +145/-23 @derailed13
 ```
+
+Model label auto-shortens `(NM context)` → `(Nm)` (e.g. `(1M context)` → `(1m)`, `(200K context)` → `(200k)`).
+
+The trailing `@username` is fetched from `GET /api/oauth/profile` (same OAuth token used for Line 4) and cached for 24 hours at `~/.claude/.profile-cache.json` (mode `0600`). Drops first on narrow terminals. Configure display via `CONTEXTBRICKS_USER`:
+
+| Value | Shows |
+|---|---|
+| `username` (default) | `@derailed13` — local-part of email |
+| `email` | `@derailed13@gmail.com` — full email |
+| `name` | `@Vlad` — OAuth `display_name` (falls back to `full_name`) |
+| `off` / `0` / `false` | Hidden |
 
 ### Line 2 — Commit Details
 
@@ -135,6 +148,7 @@ Graceful degradation on narrow terminals: drops idle-warning → hit rate → bu
 | `CONTEXTBRICKS_BRICKS` | `30` | Number of bricks in the visualization |
 | `CONTEXTBRICKS_SHOW_LIMITS` | `1` | Show rate limit utilization (`0` to hide) |
 | `CONTEXTBRICKS_SHOW_CACHE_FIX` | `1` | Merge `claude-code-cache-fix` data into Line 4 (`0` to ignore, use OAuth only) |
+| `CONTEXTBRICKS_USER` | `username` | OAuth account display on Line 1: `username` / `email` / `name` / `off` |
 | `CONTEXTBRICKS_RESET_EXACT` | `1` | Exact reset times `~1d23h` (`0` for approximate `~1d`) |
 
 ## How It Works

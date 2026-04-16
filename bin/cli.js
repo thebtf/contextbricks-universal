@@ -207,10 +207,10 @@ function test() {
 
   const now = Date.now();
   const sampleData = JSON.stringify({
-    model: { display_name: 'Sonnet 4.5' },
+    model: { display_name: 'Claude Opus 4.6 (1M context)' },
     workspace: { current_dir: process.cwd() },
     context_window: {
-      context_window_size: 200000,
+      context_window_size: 1000000,
       used_percentage: 43.5,
       remaining_percentage: 56.5,
     },
@@ -225,6 +225,15 @@ function test() {
       seven_day: { utilization: 57.0, resets_at: new Date(now + 2 * 86400000).toISOString() },
       seven_day_sonnet: { utilization: 9.0, resets_at: new Date(now + 4 * 86400000).toISOString() },
       seven_day_opus: null,
+    },
+    _mock_profile: {
+      account: {
+        email: 'you@example.com',
+        display_name: 'Tester',
+        full_name: 'Test User',
+        has_claude_max: true,
+      },
+      organization: { organization_type: 'claude_max' },
     },
   });
 

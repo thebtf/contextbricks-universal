@@ -17,6 +17,7 @@
 //   CONTEXTBRICKS_BRICKS=40      Number of bricks (default: 30)
 //   CONTEXTBRICKS_SHOW_LIMITS=0  Hide rate-limit line (default: shown)
 //   CONTEXTBRICKS_SHOW_CACHE_FIX=0  Ignore cache-fix data, use OAuth only (default: merge)
+//   CONTEXTBRICKS_USER=username  OAuth account display: username|email|name|off (default: username)
 //   CONTEXTBRICKS_RESET_EXACT=0  Approximate reset times (default: exact)
 //   CONTEXTBRICKS_RIGHT_PADDING=28  Reserve N chars on right of Line 1 for Claude annotations
 //                                   (auto-set to 28 when TERM_PROGRAM=vscode)
@@ -152,6 +153,120 @@ function readOAuthToken() {
     return getPath(creds, 'claudeAiOauth.accessToken') || null;
   } catch {
     return null;
+  }
+}
+
+// Fetch OAuth account profile (email, display name, org) with file cache.
+// Cached 24h, stale-while-error up to 7d — profile is near-static.
+function fetchUserProfile(token, input) {
+  // Mock data for tests
+  const mockProfile = getPath(input, '_mock_profile');
+  if (mockProfile) return mockProfile;
+
+  if (!token) return null;
+
+  const cacheFile = path.join(os.homedir(), '.claude', '.profile-cache.json');
+  const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+  const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7d
+  const ERROR_BACKOFF_MS = 10 * 60 * 1000; // 10min
+
+  let staleData = null;
+  try {
+    const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    const age = Date.now() - (cache.timestamp || 0);
+    if (age < MAX_STALE_MS) staleData = cache.data;
+    if (age < CACHE_TTL_MS) return cache.data;
+  } catch {
+    // no cache or invalid
+  }
+
+  const httpsScript = `
+    const https = require('https');
+    const options = {
+      hostname: 'api.anthropic.com',
+      path: '/api/oauth/profile',
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + process.env.ANTHROPIC_TOKEN,
+        'anthropic-beta': 'oauth-2025-04-20',
+        'Accept': 'application/json',
+      },
+    };
+    const req = https.request(options, (res) => {
+      let body = '';
+      let totalSize = 0;
+      const MAX_BODY = 64 * 1024;
+      res.on('data', (chunk) => {
+        totalSize += chunk.length;
+        if (totalSize > MAX_BODY) { req.destroy(); return; }
+        body += chunk;
+      });
+      res.on('end', () => {
+        if (res.statusCode === 200) process.stdout.write(body);
+      });
+    });
+    req.on('error', () => {});
+    req.end();
+  `;
+
+  try {
+    const result = spawnSync(process.execPath, ['-e', httpsScript], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 4000,
+      windowsHide: true,
+      env: { ...process.env, ANTHROPIC_TOKEN: token },
+    });
+    if (result.status === 0 && result.stdout) {
+      const data = JSON.parse(result.stdout);
+      if (data && data.account && data.account.email) {
+        try {
+          fs.writeFileSync(cacheFile, JSON.stringify({ timestamp: Date.now(), data }), {
+            encoding: 'utf8',
+            mode: 0o600,
+          });
+        } catch {
+          // cache write failure non-fatal
+        }
+        return data;
+      }
+    }
+  } catch {
+    // spawnSync failed
+  }
+
+  // Serve stale with error-backoff timestamp to avoid hammering
+  if (staleData) {
+    try {
+      const backoffTs = Date.now() - (CACHE_TTL_MS - ERROR_BACKOFF_MS);
+      fs.writeFileSync(cacheFile, JSON.stringify({ timestamp: backoffTs, data: staleData }), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+    } catch {
+      // ignore
+    }
+  }
+  return staleData;
+}
+
+// Format user label based on format preference.
+// Returns a string like "@derailed13" or "" when unavailable.
+function formatUserLabel(profile, format) {
+  if (!profile || !profile.account) return '';
+  const email = profile.account.email || '';
+  const name = profile.account.display_name || profile.account.full_name || '';
+  switch (format) {
+    case 'email':
+      return email ? `@${email}` : '';
+    case 'name':
+      return name ? `@${name}` : '';
+    case 'username':
+    default: {
+      const local = email.includes('@') ? email.split('@')[0] : email;
+      if (local) return `@${local}`;
+      return name ? `@${name}` : '';
+    }
   }
 }
 
@@ -643,7 +758,12 @@ function main() {
   // We always output full statusline — layout issues are Claude Code's responsibility.
 
   // Parse Claude data
-  const model = (getPath(input, 'model.display_name') || 'Claude').replace('Claude ', '');
+  // Shorten "(1M context)" / "(200K context)" → "(1m)" / "(200k)" for compactness
+  const rawModel = (getPath(input, 'model.display_name') || 'Claude').replace('Claude ', '');
+  const model = rawModel.replace(
+    /\s*\(\s*(\d+)\s*([KMG])\s*context\s*\)/i,
+    (_, n, unit) => ` (${n}${unit.toLowerCase()})`,
+  );
   const currentDir = getPath(input, 'workspace.current_dir') || process.cwd();
   const linesAdded = Number(getPath(input, 'cost.total_lines_added')) || 0;
   const linesRemoved = Number(getPath(input, 'cost.total_lines_removed')) || 0;
@@ -765,29 +885,44 @@ function main() {
     ? ` | ${c.greenNorm}+${linesAdded}${c.reset}/${c.redNorm}-${linesRemoved}${c.reset}`
     : '';
 
+  // Read OAuth token once — reused for profile (Line 1 tail) and usage (Line 4).
+  const oauthToken = readOAuthToken();
+
+  // Optional: OAuth account identifier (rightmost segment, drops first on overflow)
+  const userFormat = (process.env.CONTEXTBRICKS_USER || 'username').toLowerCase();
+  const userEnabled = userFormat !== '0' && userFormat !== 'off' && userFormat !== 'false';
+  let userSegment = '';
+  if (userEnabled) {
+    const profile = fetchUserProfile(oauthToken, input);
+    const label = formatUserLabel(profile, userFormat);
+    if (label) userSegment = ` ${c.dim}${label}${c.reset}`;
+  }
+
   // Build Line 1 with graceful degradation
-  function buildLine1(includeWorktree, includeSubdir, includeDiff) {
+  function buildLine1(includeWorktree, includeSubdir, includeDiff, includeUser) {
     let s = line1Core;
     if (includeWorktree) s += worktreeSegment;
     s += branchSegment;
     if (includeSubdir) s += subdirSegment;
     s += gitStatusSegment;
     if (includeDiff) s += diffSegment;
+    if (includeUser) s += userSegment;
     return s;
   }
 
-  let line1 = buildLine1(true, true, true);
+  let line1 = buildLine1(true, true, true, true);
   const maxWidth = termWidth - rightPadding;
   if (visibleLen(line1) > maxWidth) {
-    if (visibleLen(line1) > maxWidth) {
-      line1 = buildLine1(true, true, false);   // drop diff
-    }
-    if (visibleLen(line1) > maxWidth) {
-      line1 = buildLine1(true, false, false);  // drop subdir
-    }
-    if (visibleLen(line1) > maxWidth) {
-      line1 = buildLine1(false, false, false); // drop worktree
-    }
+    line1 = buildLine1(true, true, true, false);  // drop user
+  }
+  if (visibleLen(line1) > maxWidth) {
+    line1 = buildLine1(true, true, false, false); // drop diff
+  }
+  if (visibleLen(line1) > maxWidth) {
+    line1 = buildLine1(true, false, false, false); // drop subdir
+  }
+  if (visibleLen(line1) > maxWidth) {
+    line1 = buildLine1(false, false, false, false); // drop worktree
   }
 
   // === Build Line 2: Commit hash + message ===
@@ -887,8 +1022,7 @@ function main() {
   // Line 4: Unified rate-limit line (OAuth + cache-fix merge)
   const showLimits = process.env.CONTEXTBRICKS_SHOW_LIMITS !== '0';
   if (showLimits) {
-    const token = readOAuthToken();
-    const oauthData = fetchUsageData(token, input);
+    const oauthData = fetchUsageData(oauthToken, input);
     const useCacheFix = process.env.CONTEXTBRICKS_SHOW_CACHE_FIX !== '0';
     const cfData = useCacheFix ? readCacheFixQuota() : null;
     const merged = mergeRateData(oauthData, cfData);

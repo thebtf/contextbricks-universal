@@ -22,7 +22,8 @@
 - **Official percentage fields** (Claude Code 2.1.6+) with fallback calculation (2.0.70+)
 - **Git integration** — repo, branch, commit hash, message, dirty/ahead/behind indicators
 - **Session metrics** — model name, lines changed, duration, cost (hidden for Max subscribers)
-- **Environment config** — `CONTEXTBRICKS_SHOW_DIR`, `CONTEXTBRICKS_BRICKS`, `CONTEXTBRICKS_SHOW_LIMITS`
+- **claude-code-cache-fix auto-detection** — burn rates, TTL tier, cache hit rate, PEAK/OVERAGE (Line 5)
+- **Environment config** — `CONTEXTBRICKS_SHOW_DIR`, `CONTEXTBRICKS_BRICKS`, `CONTEXTBRICKS_SHOW_LIMITS`, `CONTEXTBRICKS_SHOW_CACHE_FIX`
 
 ## Installation
 
@@ -95,6 +96,16 @@ contextbricks install
 5h:64% ~23m | 7d:57% ~1d23h | sonnet:9% ~3d23h
 ```
 
+### Line 5 — claude-code-cache-fix Indicator (auto-detected)
+
+When [`claude-code-cache-fix`](https://www.npmjs.com/package/claude-code-cache-fix) or `claude-code-meter` is installed, Line 5 appears automatically with complementary quota data:
+
+```
+[cfx] Q5h: 23% (+1.2%/m) | Q7d: 45% (+0.3%/hr) | TTL:1h 87% | PEAK
+```
+
+Displayed when `~/.claude/claude-meter.jsonl` or `~/.claude/quota-status.json` exists.
+
 | Symbol | Meaning |
 |--------|---------|
 | `■` (cyan) | Used context |
@@ -107,6 +118,14 @@ contextbricks install
 | `sonnet:X%` | 7-day Sonnet sub-limit (if applicable) |
 | `opus:X%` | 7-day Opus sub-limit (if applicable) |
 | `~22m` / `~1d23h` | Time until limit resets (exact by default) |
+| `[cfx]` | Line 5 marker — data from `claude-code-cache-fix` |
+| `Q5h:N% (+X/m)` | 5-hour utilization with burn rate (%/min) |
+| `Q7d:N% (+X/hr)` | 7-day utilization with burn rate (%/hr) |
+| `TTL:5m` / `TTL:1h` | Prompt-cache TTL tier currently served by Anthropic |
+| `⚠ idle >5m = NK rebuild` | Cold-rebuild cost warning when on 5m tier |
+| `NN%` (after TTL) | Cache hit rate |
+| `PEAK` (yellow) | Peak-hour window |
+| `OVERAGE` | Overage billing active |
 
 ## Configuration
 
@@ -115,6 +134,7 @@ contextbricks install
 | `CONTEXTBRICKS_SHOW_DIR` | `1` | Show current subdirectory (`0` to hide) |
 | `CONTEXTBRICKS_BRICKS` | `30` | Number of bricks in the visualization |
 | `CONTEXTBRICKS_SHOW_LIMITS` | `1` | Show rate limit utilization (`0` to hide) |
+| `CONTEXTBRICKS_SHOW_CACHE_FIX` | `1` | Show `claude-code-cache-fix` indicator (`0` to hide) |
 | `CONTEXTBRICKS_RESET_EXACT` | `1` | Exact reset times `~1d23h` (`0` for approximate `~1d`) |
 
 ## How It Works

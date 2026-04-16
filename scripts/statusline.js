@@ -1,20 +1,23 @@
 #!/usr/bin/env node
 
 // Claude Code Custom Status Line (Node.js / Cross-Platform)
-// v4.3.0 - Node.js rewrite for Windows + Linux + macOS
+// v4.5.0 - Node.js rewrite for Windows + Linux + macOS
 // Line 1: Model | Repo:Branch [subdir] | git status | lines changed
 // Line 2: [commit] commit message
 // Line 3: Context bricks | percentage | free | duration | cost
 // Line 4: Rate limit utilization (5h, 7d Sonnet, 7d Opus) — Max/Pro subscribers
+// Line 5: claude-code-cache-fix quota indicator (Q5h/Q7d burn rates, TTL tier,
+//         cache hit rate, PEAK, OVERAGE) — auto-detected when data file exists
 //
 // Configuration via environment variables:
-//   CONTEXTBRICKS_SHOW_DIR=1   Show current subdirectory (default: 1)
-//   CONTEXTBRICKS_SHOW_DIR=0   Hide subdirectory
-//   CONTEXTBRICKS_BRICKS=40    Number of bricks (default: 30)
-//   CONTEXTBRICKS_SHOW_LIMITS=0 Hide rate limit line (default: shown)
-//   CONTEXTBRICKS_RESET_EXACT=0 Approximate reset times (default: exact)
-//   CONTEXTBRICKS_RIGHT_PADDING=28 Reserve N chars on right of Line 1 for Claude annotations
-//                                  (auto-set to 28 when TERM_PROGRAM=vscode)
+//   CONTEXTBRICKS_SHOW_DIR=1     Show current subdirectory (default: 1)
+//   CONTEXTBRICKS_SHOW_DIR=0     Hide subdirectory
+//   CONTEXTBRICKS_BRICKS=40      Number of bricks (default: 30)
+//   CONTEXTBRICKS_SHOW_LIMITS=0  Hide rate limit line (default: shown)
+//   CONTEXTBRICKS_SHOW_CACHE_FIX=0  Hide claude-code-cache-fix line (default: shown)
+//   CONTEXTBRICKS_RESET_EXACT=0  Approximate reset times (default: exact)
+//   CONTEXTBRICKS_RIGHT_PADDING=28  Reserve N chars on right of Line 1 for Claude annotations
+//                                   (auto-set to 28 when TERM_PROGRAM=vscode)
 //
 // Uses new percentage fields (Claude Code 2.1.6+) for accurate context display.
 // Falls back to current_usage calculation for older versions.
@@ -339,6 +342,159 @@ function formatRateLimitLine(data) {
   return segments.length > 0 ? segments.join(' | ') : '';
 }
 
+// Read extras (cache tier, hit rate, peak_hour) from quota-status.json if present
+function readQuotaStatusExtras(qsPath) {
+  try {
+    const raw = fs.readFileSync(qsPath, 'utf8');
+    const qs = JSON.parse(raw);
+    return {
+      cache: (qs && qs.cache && typeof qs.cache === 'object') ? qs.cache : {},
+      peak_hour: Boolean(qs && qs.peak_hour),
+    };
+  } catch {
+    return { cache: {}, peak_hour: false };
+  }
+}
+
+// Detect claude-code-cache-fix / claude-code-meter output and return latest record.
+// Primary source: ~/.claude/claude-meter.jsonl (last line).
+// Fallback: ~/.claude/quota-status.json (written by cache-fix interceptor).
+// Returns null when neither file is readable — indicator stays hidden.
+function readCacheFixQuota() {
+  const home = os.homedir();
+  const jsonlPath = path.join(home, '.claude', 'claude-meter.jsonl');
+  const qsPath = path.join(home, '.claude', 'quota-status.json');
+
+  // Primary: tail of claude-meter.jsonl
+  try {
+    const stat = fs.statSync(jsonlPath);
+    if (stat.isFile() && stat.size > 0) {
+      const MAX_TAIL = 64 * 1024;
+      const size = stat.size;
+      const start = Math.max(0, size - MAX_TAIL);
+      const len = size - start;
+      const buf = Buffer.alloc(len);
+      const fd = fs.openSync(jsonlPath, 'r');
+      try {
+        fs.readSync(fd, buf, 0, len, start);
+      } finally {
+        fs.closeSync(fd);
+      }
+      const lines = buf.toString('utf8').split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length > 0) {
+        try {
+          const rec = JSON.parse(lines[lines.length - 1]);
+          return { ...rec, _extras: readQuotaStatusExtras(qsPath) };
+        } catch {
+          // malformed last line — fall through to qs fallback
+        }
+      }
+    }
+  } catch {
+    // no jsonl — fall through
+  }
+
+  // Fallback: translate quota-status.json into the same shape
+  try {
+    const raw = fs.readFileSync(qsPath, 'utf8');
+    const qs = JSON.parse(raw);
+    const fh = qs.five_hour || {};
+    const sd = qs.seven_day || {};
+    return {
+      q5h: Number(fh.utilization) || 0,
+      q7d: Number(sd.utilization) || 0,
+      q5h_reset: Number(fh.resets_at) || 0,
+      q7d_reset: Number(sd.resets_at) || 0,
+      qoverage: qs.overage_status || '',
+      ts: qs.timestamp || '',
+      _extras: {
+        cache: (qs.cache && typeof qs.cache === 'object') ? qs.cache : {},
+        peak_hour: Boolean(qs.peak_hour),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Format cache-fix indicator line. Mirrors quota-statusline.sh output:
+//   Q5h: N% (+X.X%/m) | Q7d: N% (+X.X%/hr) [| OVERAGE] [| TTL:5m ⚠ idle >5m = KR rebuild] [HH%] [| PEAK]
+function formatCacheFixLine(rec) {
+  if (!rec) return '';
+
+  const q5hRaw = Number(rec.q5h);
+  const q7dRaw = Number(rec.q7d);
+  if (!isFinite(q5hRaw) && !isFinite(q7dRaw)) return '';
+
+  const q5h = Math.floor((isFinite(q5hRaw) ? q5hRaw : 0) * 100);
+  const q7d = Math.floor((isFinite(q7dRaw) ? q7dRaw : 0) * 100);
+  const overage = rec.qoverage || '';
+  const q5hReset = Number(rec.q5h_reset) || 0;
+  const q7dReset = Number(rec.q7d_reset) || 0;
+
+  const nowMs = rec.ts ? new Date(rec.ts).getTime() : Date.now();
+  const now = isFinite(nowMs) ? nowMs : Date.now();
+
+  // Q5h burn rate: %/min since window start (reset - 5h)
+  let rate5 = '';
+  if (q5hReset > 0 && q5h > 0) {
+    const windowStartMs = q5hReset * 1000 - 5 * 3600 * 1000;
+    const elapsedMin = (now - windowStartMs) / 60000;
+    if (elapsedMin > 1) {
+      const v = q5h / elapsedMin;
+      rate5 = (v >= 0 ? '+' : '') + v.toFixed(1);
+    }
+  }
+
+  // Q7d burn rate: %/hr since window start (reset - 7d)
+  let rate7 = '';
+  if (q7dReset > 0 && q7d > 0) {
+    const windowStartMs = q7dReset * 1000 - 7 * 86400 * 1000;
+    const elapsedMin = (now - windowStartMs) / 60000;
+    if (elapsedMin > 1) {
+      const v = q7d / (elapsedMin / 60);
+      rate7 = (v >= 0 ? '+' : '') + v.toFixed(1);
+    }
+  }
+
+  let label = `${c.dim}[cfx]${c.reset} Q5h: ${q5h}%`;
+  if (rate5) label += ` (${rate5}%/m)`;
+  label += ` | Q7d: ${q7d}%`;
+  if (rate7) label += ` (${rate7}%/hr)`;
+  if (overage === 'active') label += ' | OVERAGE';
+
+  const extras = rec._extras || { cache: {}, peak_hour: false };
+  const cache = extras.cache || {};
+  const ttl = cache.ttl_tier || '';
+  const hit = cache.hit_rate;
+
+  if (ttl) {
+    if (ttl === '5m') {
+      label += ` | \x1b[31mTTL:5m\x1b[0m`;
+      const cacheCr = Number(cache.cache_creation) || 0;
+      const cacheRd = Number(cache.cache_read) || 0;
+      const prefix = cacheCr + cacheRd;
+      if (prefix > 0) {
+        if (prefix >= 1_000_000) {
+          label += ` \x1b[31m\u26A0 idle >5m = ${(prefix / 1_000_000).toFixed(1)}M rebuild\x1b[0m`;
+        } else {
+          label += ` \x1b[31m\u26A0 idle >5m = ${Math.round(prefix / 1000)}K rebuild\x1b[0m`;
+        }
+      }
+    } else {
+      label += ` | TTL:${ttl}`;
+    }
+  }
+  if (hit != null && hit !== '' && hit !== 'N/A') {
+    label += ` ${hit}%`;
+  }
+  if (extras.peak_hour) {
+    label += ` | \x1b[33mPEAK\x1b[0m`;
+  }
+
+  return label;
+}
+
 // Strip ANSI escape codes to measure visible string length
 function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -619,6 +775,16 @@ function main() {
     const line4 = formatRateLimitLine(usageData);
     if (line4) {
       process.stdout.write(line4 + '\n');
+    }
+  }
+
+  // Line 5: claude-code-cache-fix indicator (auto-detected via data file presence)
+  const showCacheFix = process.env.CONTEXTBRICKS_SHOW_CACHE_FIX !== '0';
+  if (showCacheFix) {
+    const cfData = readCacheFixQuota();
+    const line5 = formatCacheFixLine(cfData);
+    if (line5) {
+      process.stdout.write(line5 + '\n');
     }
   }
 }

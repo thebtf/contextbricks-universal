@@ -263,7 +263,7 @@ function fetchUserProfile(token, input) {
 }
 
 // Format user label based on format preference.
-// Returns a string like "@derailed13" or "" when unavailable.
+// Returns a string like "@alice" or "" when unavailable.
 function formatUserLabel(profile, format) {
   if (!profile || !profile.account) return '';
   const email = profile.account.email || '';

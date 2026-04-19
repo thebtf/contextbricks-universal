@@ -532,12 +532,23 @@ function mergeRateData(oauthData, cfData, expectedOrgId) {
     cfRejected: false,
   };
 
-  // Org gate: if cfData declares a different org than the active profile,
-  // reject it entirely. This catches the relogin-stale-file scenario.
+  // Org gate: fail-closed when we cannot verify the cache-fix org matches the
+  // active profile. Two rejection cases:
+  //  (1) Profile fetch failed or user is logged out (expectedOrgId empty) —
+  //      we cannot verify, so we cannot trust cache-fix (it may contain stale
+  //      headers from a prior account).
+  //  (2) cfData declares a different org than the active profile — relogin
+  //      stale-file scenario.
+  // A cache-fix record WITHOUT an org_id claim is permitted when the profile
+  // is verified (older cache-fix versions may not populate this field); it
+  // will only render the current profile's usage because OAuth data wins
+  // any disputed fields.
   let cfUsable = cfData;
-  if (cfUsable && expectedOrgId) {
+  if (cfUsable) {
     const cfOrg = (cfUsable._extras && cfUsable._extras.org_id) || '';
-    if (cfOrg && cfOrg !== expectedOrgId) {
+    const cannotVerify = !expectedOrgId;
+    const orgMismatch = cfOrg && expectedOrgId && cfOrg !== expectedOrgId;
+    if (cannotVerify || orgMismatch) {
       out.cfRejected = true;
       cfUsable = null;
     }
@@ -563,10 +574,13 @@ function mergeRateData(oauthData, cfData, expectedOrgId) {
       const elapsedMin = (nowMs - windowStart) / 60000;
       if (elapsedMin > 1) burn = `+${(pct / elapsedMin).toFixed(1)}/m`;
     }
-    out.session = { utilization: pct, resets_at: resetsAt, burn, pacing: computePacing(resetsAt, WINDOW_5H, realNowMs) };
+    // Pacing anchors on nowMs (when utilization was measured), not realNowMs —
+    // prevents "under pace" false-positive when cfData.ts is a few minutes old.
+    out.session = { utilization: pct, resets_at: resetsAt, burn, pacing: computePacing(resetsAt, WINDOW_5H, nowMs) };
   } else if (oauthData && oauthData.five_hour) {
     const fh = oauthData.five_hour;
-    out.session = { utilization: fh.utilization, resets_at: fh.resets_at, burn: '', pacing: computePacing(fh.resets_at, WINDOW_5H, realNowMs) };
+    // OAuth data is fetched now → nowMs ≈ realNowMs anyway; use nowMs for consistency.
+    out.session = { utilization: fh.utilization, resets_at: fh.resets_at, burn: '', pacing: computePacing(fh.resets_at, WINDOW_5H, nowMs) };
   }
 
   // week (7d) — same priority
@@ -580,28 +594,28 @@ function mergeRateData(oauthData, cfData, expectedOrgId) {
       const elapsedMin = (nowMs - windowStart) / 60000;
       if (elapsedMin > 1) burn = `+${(pct / (elapsedMin / 60)).toFixed(1)}/hr`;
     }
-    out.week = { utilization: pct, resets_at: resetsAt, burn, pacing: computePacing(resetsAt, WINDOW_7D, realNowMs) };
+    out.week = { utilization: pct, resets_at: resetsAt, burn, pacing: computePacing(resetsAt, WINDOW_7D, nowMs) };
   } else if (oauthData && oauthData.seven_day) {
     const sd = oauthData.seven_day;
-    out.week = { utilization: sd.utilization, resets_at: sd.resets_at, burn: '', pacing: computePacing(sd.resets_at, WINDOW_7D, realNowMs) };
+    out.week = { utilization: sd.utilization, resets_at: sd.resets_at, burn: '', pacing: computePacing(sd.resets_at, WINDOW_7D, nowMs) };
   }
 
   // Sub-limits + design — OAuth-only (unified cache-fix headers have no per-model breakdown)
   if (oauthData) {
     if (oauthData.seven_day_sonnet) {
       const s = oauthData.seven_day_sonnet;
-      out.sonnet = { utilization: s.utilization, resets_at: s.resets_at, pacing: computePacing(s.resets_at, WINDOW_7D, realNowMs) };
+      out.sonnet = { utilization: s.utilization, resets_at: s.resets_at, pacing: computePacing(s.resets_at, WINDOW_7D, nowMs) };
     }
     if (oauthData.seven_day_opus) {
       const o = oauthData.seven_day_opus;
-      out.opus = { utilization: o.utilization, resets_at: o.resets_at, pacing: computePacing(o.resets_at, WINDOW_7D, realNowMs) };
+      out.opus = { utilization: o.utilization, resets_at: o.resets_at, pacing: computePacing(o.resets_at, WINDOW_7D, nowMs) };
     }
     // Claude Design lives under Anthropic's internal codename `seven_day_omelette`.
     // Only appears for accounts with the feature flag (claude_ai_omelette_enabled);
     // skip entries without a real reset timestamp to avoid rendering "design:0% ~NaN".
     if (oauthData.seven_day_omelette && oauthData.seven_day_omelette.resets_at) {
       const d = oauthData.seven_day_omelette;
-      out.design = { utilization: d.utilization, resets_at: d.resets_at, pacing: computePacing(d.resets_at, WINDOW_7D, realNowMs) };
+      out.design = { utilization: d.utilization, resets_at: d.resets_at, pacing: computePacing(d.resets_at, WINDOW_7D, nowMs) };
     }
     // Extra usage (monetary overage) — monthlyLimit is in cents.
     if (oauthData.extra_usage) {
@@ -1141,8 +1155,11 @@ function main() {
   // the caller). For now append unconditionally; fine-grained width handling is
   // for a later pass if it becomes a problem in practice.
   if (merged && merged.extra_usage && merged.extra_usage.enabled) {
-    const used = (merged.extra_usage.usedCredits / 100).toFixed(0);
-    const limit = (merged.extra_usage.monthlyLimit / 100).toFixed(0);
+    // toFixed(2) preserves cent-level precision so $0.50 doesn't round to $1.
+    // Limits are typically integers (e.g. $20.00), so the trailing .00 is
+    // accepted as consistent formatting rather than verbose noise.
+    const used = (merged.extra_usage.usedCredits / 100).toFixed(2);
+    const limit = (merged.extra_usage.monthlyLimit / 100).toFixed(2);
     brickLine += ` | ${c.dim}extra:${c.reset}${c.yellowNorm}$${used}/$${limit}${c.reset}`;
   }
 

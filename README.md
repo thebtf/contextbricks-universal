@@ -10,8 +10,8 @@
 ```
 [Opus 4.7 (1m)] claude-skills:main *↑2 | +145/-23 @derailed13
 [5f2ce67] Remove auth-js skill
-[■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87 | extra:$0/$20
-session:27%/25% +0.4/m ~3h43m | week:77%/35% +1.3/hr ~4d12h | sonnet:22% | design:0% | TTL:1h 99.9%
+[■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87 | extra:$0.00/$20.00
+session:27%/25% +0.4/m ~3h43m | week:77%/35% +1.3/hr ~4d12h | sonnet:22%/36% | design:0%/35% | TTL:1h 99.9%
 ```
 
 ## Features
@@ -113,7 +113,7 @@ The trailing `@username` is fetched from `GET /api/oauth/profile` (same OAuth to
 Full render (wide terminal, cache-fix installed):
 
 ```
-session:27%/25% +0.4/m ~3h43m | week:77%/35% +1.3/hr ~4d12h | sonnet:22%/36% | design:0%/35% | TTL:1h 99.9% | PEAK
+session:27%/25% +0.4/m ~3h43m | week:77%/35% +1.3/hr ~4d12h | sonnet:22%/36% ~4d10h | design:0%/35% | TTL:1h 99.9% | PEAK
 ```
 
 Auto-merges:

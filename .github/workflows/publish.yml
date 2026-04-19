@@ -1,0 +1,82 @@
+name: Publish to npm
+
+# Publishes the package to the npm registry on every semver tag push (vX.Y.Z)
+# using npm's Trusted Publishing (OIDC). No long-lived NPM_TOKEN secret is
+# required in this repository — npm authorises publishes from this exact
+# workflow file + environment via a short-lived OIDC token.
+#
+# Prerequisites (one-time manual setup on npmjs.com):
+#   1. Log in to npmjs.com as the package owner.
+#   2. Go to the `contextbricks-universal` package → Settings → Publishing access.
+#   3. Under "Trusted Publisher" click "Add new trusted publisher" → GitHub Actions.
+#   4. Fill in:
+#        Organization or user: thebtf
+#        Repository:           contextbricks-universal
+#        Workflow filename:    publish.yml
+#        Environment name:     npm-publish
+#   5. Save. The first publish from this workflow (after a tag push) will succeed
+#      without any repository secret.
+#
+# See: https://docs.npmjs.com/trusted-publishers/
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual trigger — useful for recovering from a missed tag or re-publishing
+  # (npm will reject a republish of the same version, but the action will still
+  # verify the workflow configuration is valid).
+  workflow_dispatch:
+
+permissions:
+  # id-token: write is REQUIRED for OIDC trusted publishing. Everything else is
+  # intentionally minimal — this workflow only reads the repo and writes to npm.
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Node 22.14.0+ ships npm >= 11.5.1 which supports Trusted Publishing.
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          # cache npm only if a lockfile is present (project currently has none,
+          # but this keeps the step forward-compatible if one is added later).
+          cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
+
+      - name: Verify tag matches package.json version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+          echo "Publishing v$PKG_VERSION"
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Run test
+        run: npm test
+
+      - name: Publish to npm (OIDC, with automatic provenance)
+        # No NODE_AUTH_TOKEN / NPM_TOKEN needed — setup-node wrote an .npmrc
+        # that tells npm to use the OIDC ID token injected by id-token: write.
+        # Provenance attestations are generated automatically under trusted
+        # publishing; no --provenance flag or NPM_CONFIG_PROVENANCE is needed.
+        run: npm publish --access public

@@ -1,12 +1,25 @@
 # ContextBricks Universal — Continuity
 
-## Project State (2026-04-16)
+## Project State (2026-04-19)
 
-**Version:** 4.5.0 (committed, not yet pushed/released)
-**Branch:** main (HEAD = feat + refactor commits, v4.5.0 unpushed)
-**npm:** https://www.npmjs.com/package/contextbricks-universal (4.4.0 published)
+**Version:** 4.6.0 (released, published to npm with OIDC provenance)
+**Branch:** main (HEAD = 86f27b0 ci: Node 24 for Trusted Publishing)
+**npm:** https://www.npmjs.com/package/contextbricks-universal (**4.6.0** published with SLSA provenance attestation)
 **GitHub:** https://github.com/thebtf/contextbricks-universal
-**Latest release tag:** v4.4.0
+**Latest release tag:** v4.6.0 (re-tagged at 85a5f7d to include publish workflow)
+
+## Done (v4.6.0 release cycle, 2026-04-19)
+
+- Unified Line 4 quota redesign: session / week / sonnet / opus / design + pacing targets + 10-step graceful degradation with short labels
+- Extra usage billing on Line 3 (gated on OAuth `is_enabled:true`)
+- Bug fixes: cross-account cache-fix leak (org-id gate, fail-closed), profile cache invalidation on relogin, usage cache TTL 15min→180s
+- Username scrubbed from all public surfaces: README, source comments, PR #7 body, v4.5.0 release notes (GitHub), force-pushed commit history
+- npm Trusted Publishing via GitHub Actions OIDC (no NPM_TOKEN). Setup: trusted publisher registered on npmjs.com, `.github/workflows/publish.yml` on main, `npm-publish` environment created.
+- 13 PRs merged today (#7 through #13, with 3 iterations to debug publish workflow: Run #1 404 auth, Run #2 npm self-upgrade bug, Run #3 Node 24 → success)
+
+## Now
+
+Nothing in flight. Next ship is unlocked: any `git push origin vX.Y.Z` (for bumped package.json version) auto-publishes to npm via the workflow.
 
 ## What This Project Does
 

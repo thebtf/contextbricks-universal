@@ -8,24 +8,27 @@
 **Works on Windows, Linux, and macOS** — pure Node.js, no bash or jq required.
 
 ```
-[Opus 4.6 (1m)] claude-skills:main *↑2 | +145/-23 @derailed13
+[Opus 4.7 (1m)] claude-skills:main *↑2 | +145/-23 @derailed13
 [5f2ce67] Remove auth-js skill
-[■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87
-5h:17% +0.2/m ~22m | 7d:51% +1.7/hr ~1d23h | sonnet:9% ~3d23h | TTL:1h 99%
+[■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87 | extra:$0.00/$20.00
+session:27%/25% +0.4/m ~3h43m | week:77%/35% +1.3/hr ~4d12h | sonnet:22%/36% | design:0%/35% | TTL:1h 99.9%
 ```
 
 ## Features
 
 - **Real-time context tracking** — brick visualization of context window usage
-- **Rate limit tracking** — 5-hour and 7-day utilization with reset timers (Max/Pro subscribers)
+- **Unified Line 4 quotas** — session (5h) + weekly (7d) + sonnet/opus sub-limits + Claude Design, all on one line
+- **Pacing target** (`/NN%`) — shows expected % for elapsed-time-in-window (green = under pace, red = ahead of pace)
+- **Rate-limit merge** — Anthropic OAuth usage + [`claude-code-cache-fix`](https://www.npmjs.com/package/claude-code-cache-fix) data, cross-account safe (org-id gate)
+- **Extra usage on Line 3** — monthly overage billing `extra:$N/$M` next to session cost
+- **Burn rates** — `+0.4/m` (5h) / `+1.3/hr` (7d) from cache-fix data
+- **TTL tier indicator** — `TTL:1h 99.9%` or red `TTL:5m ⚠ idle >5m = 800K rebuild`
+- **10-step graceful degradation** — short labels (`s/w/son/des`) then drops markers → TTL → design → pacing → burn → reset → sub-limits
 - **Color gradient** — 256-color green-to-red scale based on utilization percentage
-- **Official percentage fields** (Claude Code 2.1.6+) with fallback calculation (2.0.70+)
 - **Git integration** — repo, branch, commit hash, message, dirty/ahead/behind indicators
-- **OAuth account identifier** — auto-fetched `@username` / `@email` / `@display_name` tail on Line 1 (24h cache)
-- **Compact model label** — `(1M context)` shortened to `(1m)` for less visual noise
-- **Session metrics** — model name, lines changed, duration, cost (hidden for Max subscribers)
-- **claude-code-cache-fix merge** — Line 4 auto-merges OAuth usage with fresher cache-fix data: burn rates (`+0.2/m`, `+1.7/hr`), TTL tier, cache hit rate, PEAK, OVERAGE
-- **Environment config** — `CONTEXTBRICKS_SHOW_DIR`, `CONTEXTBRICKS_BRICKS`, `CONTEXTBRICKS_SHOW_LIMITS`, `CONTEXTBRICKS_SHOW_CACHE_FIX`
+- **OAuth account identifier** — auto-fetched `@username` on Line 1, invalidates cache on relogin (via `.credentials.json` mtime)
+- **Compact model label** — `(1M context)` shortened to `(1m)`
+- **Environment config** — `CONTEXTBRICKS_SHOW_DIR`, `CONTEXTBRICKS_BRICKS`, `CONTEXTBRICKS_SHOW_LIMITS`, `CONTEXTBRICKS_SHOW_CACHE_FIX`, `CONTEXTBRICKS_USER`, `CONTEXTBRICKS_LABELS`
 
 ## Installation
 
@@ -97,27 +100,32 @@ The trailing `@username` is fetched from `GET /api/oauth/profile` (same OAuth to
 [5f2ce67] Remove auth-js skill
 ```
 
-### Line 3 — Context Bricks
+### Line 3 — Context Bricks + Billing
 
 ```
-[■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87
+[■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87 | extra:$0/$20
 ```
 
-### Line 4 — Unified Rate Limits (Max/Pro subscribers + optional cache-fix merge)
+`extra:$N/$M` appears when the OAuth profile has extra-usage (monthly overage billing) enabled. Monthly limit is shown in USD (converted from cents).
 
-Baseline (OAuth only):
+### Line 4 — Unified Quota Line
 
-```
-5h:64% ~23m | 7d:57% ~1d23h | sonnet:9% ~3d23h
-```
-
-When [`claude-code-cache-fix`](https://www.npmjs.com/package/claude-code-cache-fix) or `claude-code-meter` is also installed, Line 4 auto-merges its fresher per-request data for 5h/7d utilization + burn rates + TTL/cache extras (OAuth is still queried for `sonnet`/`opus` sub-limits, which the unified cache-fix headers don't expose):
+Full render (wide terminal, cache-fix installed):
 
 ```
-5h:17% +0.2/m ~22m | 7d:51% +1.7/hr ~1d23h | sonnet:9% ~3d23h | TTL:1h 99% | PEAK
+session:27%/25% +0.4/m ~3h43m | week:77%/35% +1.3/hr ~4d12h | sonnet:22%/36% ~4d10h | design:0%/35% | TTL:1h 99.9% | PEAK
 ```
 
-Auto-detected via `~/.claude/claude-meter.jsonl` or `~/.claude/quota-status.json`.
+Auto-merges:
+- **Anthropic OAuth `/api/oauth/usage`** — authoritative source for `sonnet`/`opus` sub-limits, `design` (from the internal `seven_day_omelette` field), and `extra_usage`.
+- **`claude-code-cache-fix`** via `~/.claude/claude-meter.jsonl` or `quota-status.json` — fresher per-request source for `session`/`week` utilization, burn rates, TTL tier, cache hit %, PEAK, OVERAGE.
+
+**Cross-account safety**: when cache-fix's `anthropic-organization-id` header differs from the active OAuth profile's org, cache-fix data is dropped (prevents stale values after a relogin into a different account).
+
+**Pacing target** (`/NN%`): expected % for elapsed-time-in-window. Coloured relative to actual usage:
+- Green → more than 5% under pace (headroom)
+- Dim → within ±5% of pace
+- Red → more than 5% over pace (burning fast)
 
 | Symbol | Meaning |
 |--------|---------|
@@ -126,11 +134,13 @@ Auto-detected via `~/.claude/claude-meter.jsonl` or `~/.claude/quota-status.json
 | `*` | Uncommitted changes |
 | `↑3` | Ahead of remote by 3 |
 | `↓2` | Behind remote by 2 |
-| `5h:X%` | 5-hour rolling limit utilization |
-| `7d:X%` | 7-day overall limit utilization |
-| `+0.2/m`, `+1.7/hr` | Burn rate since window start (cache-fix only) |
+| `session:X%` | 5-hour rolling limit utilization |
+| `week:X%` | 7-day overall limit utilization |
+| `/NN%` (after `%`) | Pacing target (expected % based on elapsed time) |
+| `+0.4/m`, `+1.3/hr` | Burn rate since window start (cache-fix only) |
 | `sonnet:X%` | 7-day Sonnet sub-limit (OAuth only) |
 | `opus:X%` | 7-day Opus sub-limit (OAuth only) |
+| `design:X%` | 7-day Claude Design sub-limit (OAuth, from `seven_day_omelette`) |
 | `~22m` / `~1d23h` | Time until limit resets (exact by default) |
 | `TTL:5m` (red) / `TTL:1h` | Prompt-cache TTL tier currently served by Anthropic |
 | `⚠ idle >5m = NK rebuild` | Cold-rebuild cost warning when on 5m tier |
@@ -138,7 +148,18 @@ Auto-detected via `~/.claude/claude-meter.jsonl` or `~/.claude/quota-status.json
 | `PEAK` (yellow) | Peak-hour window |
 | `OVERAGE` | Overage billing active |
 
-Graceful degradation on narrow terminals: drops idle-warning → hit rate → burn rates → `PEAK` → `OVERAGE` → `TTL` extras → sub-limits, in that order. Minimum shown: `5h:X% | 7d:X%`.
+**10-step graceful degradation** on narrow terminals:
+
+1. Full labels (`session`, `week`, `sonnet`, `design`)
+2. **Short labels** (`s`, `w`, `son`, `des`) — ~16 chars saved, no info loss
+3. Drop `PEAK` / `OVERAGE` markers
+4. Drop cache hit %
+5. Drop `TTL` entirely
+6. Drop `design` segment
+7. Drop pacing `/NN%`
+8. Drop burn rates
+9. Drop reset times
+10. Drop sub-limits → minimum: `s:NN% | w:NN%`
 
 ## Configuration
 
@@ -146,9 +167,10 @@ Graceful degradation on narrow terminals: drops idle-warning → hit rate → bu
 |---|---|---|
 | `CONTEXTBRICKS_SHOW_DIR` | `1` | Show current subdirectory (`0` to hide) |
 | `CONTEXTBRICKS_BRICKS` | `30` | Number of bricks in the visualization |
-| `CONTEXTBRICKS_SHOW_LIMITS` | `1` | Show rate limit utilization (`0` to hide) |
+| `CONTEXTBRICKS_SHOW_LIMITS` | `1` | Show rate limit line (`0` to hide) |
 | `CONTEXTBRICKS_SHOW_CACHE_FIX` | `1` | Merge `claude-code-cache-fix` data into Line 4 (`0` to ignore, use OAuth only) |
 | `CONTEXTBRICKS_USER` | `username` | OAuth account display on Line 1: `username` / `email` / `name` / `off` |
+| `CONTEXTBRICKS_LABELS` | (auto) | Force short labels (`s/w/son/opus/des`) by setting to `short`. Default auto-degrades based on terminal width. |
 | `CONTEXTBRICKS_RESET_EXACT` | `1` | Exact reset times `~1d23h` (`0` for approximate `~1d`) |
 
 ## How It Works

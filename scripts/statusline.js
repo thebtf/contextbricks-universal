@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 
 // Claude Code Custom Status Line (Node.js / Cross-Platform)
-// v4.5.0 - Node.js rewrite for Windows + Linux + macOS
-// Line 1: Model | Repo:Branch [subdir] | git status | lines changed
+// v4.6.0 - Node.js rewrite for Windows + Linux + macOS
+// Line 1: Model | Repo:Branch [subdir] | git status | lines changed | @user
 // Line 2: [commit] commit message
-// Line 3: Context bricks | percentage | free | duration | cost
+// Line 3: Context bricks | percentage | free | duration | cost | extra:$N/$M
 // Line 4: Unified rate-limit line — merges Anthropic OAuth usage (authoritative
-//         for sub-limits) with claude-code-cache-fix data (fresher 5h/7d
-//         utilization + burn rates + TTL tier + cache hit rate + PEAK/OVERAGE).
-//         Cache-fix data is auto-detected via ~/.claude/claude-meter.jsonl or
-//         ~/.claude/quota-status.json and takes priority for 5h/7d segments.
+//         for sub-limits + Claude Design + extra_usage) with claude-code-cache-fix
+//         data (fresher 5h/7d utilization + burn rates + TTL + cache hit rate +
+//         PEAK/OVERAGE). Labels: session/week/sonnet/opus/design with pacing
+//         target (`/NN%`) showing expected usage for elapsed-time-in-window.
+//         Cross-account safety: cache-fix data is dropped when its
+//         anthropic-organization-id differs from the active OAuth profile's org.
+//         Cache-fix detected via ~/.claude/claude-meter.jsonl or quota-status.json.
 //
 // Configuration via environment variables:
 //   CONTEXTBRICKS_SHOW_DIR=1     Show current subdirectory (default: 1)
@@ -18,6 +21,7 @@
 //   CONTEXTBRICKS_SHOW_LIMITS=0  Hide rate-limit line (default: shown)
 //   CONTEXTBRICKS_SHOW_CACHE_FIX=0  Ignore cache-fix data, use OAuth only (default: merge)
 //   CONTEXTBRICKS_USER=username  OAuth account display: username|email|name|off (default: username)
+//   CONTEXTBRICKS_LABELS=short   Force short labels (s/w/son/opus/des) (default: auto-degrade)
 //   CONTEXTBRICKS_RESET_EXACT=0  Approximate reset times (default: exact)
 //   CONTEXTBRICKS_RIGHT_PADDING=28  Reserve N chars on right of Line 1 for Claude annotations
 //                                   (auto-set to 28 when TERM_PROGRAM=vscode)
@@ -166,16 +170,24 @@ function fetchUserProfile(token, input) {
   if (!token) return null;
 
   const cacheFile = path.join(os.homedir(), '.claude', '.profile-cache.json');
+  const credsFile = path.join(os.homedir(), '.claude', '.credentials.json');
   const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
   const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7d
   const ERROR_BACKOFF_MS = 10 * 60 * 1000; // 10min
+
+  // Credentials mtime: used to invalidate profile cache on relogin.
+  // Without this, a relogin into a different account would keep showing
+  // the old @username for up to 24h.
+  let credsMtimeMs = 0;
+  try { credsMtimeMs = fs.statSync(credsFile).mtimeMs || 0; } catch {}
 
   let staleData = null;
   try {
     const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
     const age = Date.now() - (cache.timestamp || 0);
-    if (age < MAX_STALE_MS) staleData = cache.data;
-    if (age < CACHE_TTL_MS) return cache.data;
+    const credsChangedAfterCache = credsMtimeMs > 0 && credsMtimeMs > (cache.timestamp || 0);
+    if (age < MAX_STALE_MS && !credsChangedAfterCache) staleData = cache.data;
+    if (age < CACHE_TTL_MS && !credsChangedAfterCache) return cache.data;
   } catch {
     // no cache or invalid
   }
@@ -295,7 +307,9 @@ function fetchUsageData(token, input) {
   if (!token) return null;
 
   const cacheFile = path.join(os.homedir(), '.claude', '.usage-cache.json');
-  const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+  // 180s matches jtbr community-reference recommendation: fresher than 15min,
+  // still well under any rate-limit threshold for a single-user statusline.
+  const CACHE_TTL_MS = 180 * 1000; // 3 minutes
   const MAX_STALE_MS = 5 * 60 * 60 * 1000; // 5 hours (matches Anthropic's rolling window)
   const ERROR_BACKOFF_MS = 3 * 60 * 1000; // 3 minutes
 
@@ -435,121 +449,189 @@ function formatResetTime(isoStr, exact) {
   }
 }
 
-// Build a single rate-limit segment like "5h:23% +0.2/m ~1h30m".
-// entry: { utilization, resets_at, burn } — burn is optional like "+0.2/m" or "+1.7/hr"
-function buildLimitSegment(entry, label, exact) {
+// Compute pacing target (expected % used, based on elapsed time in window).
+// Returns integer 0..100, or null if reset_at is missing/invalid.
+function computePacing(resetsAtIso, windowMs, nowMs) {
+  if (!resetsAtIso || !windowMs) return null;
+  const resetMs = new Date(resetsAtIso).getTime();
+  if (!isFinite(resetMs) || resetMs <= 0) return null;
+  const windowStart = resetMs - windowMs;
+  const elapsed = nowMs - windowStart;
+  if (elapsed <= 0) return 0;
+  const pct = Math.floor((elapsed / windowMs) * 100);
+  return Math.max(0, Math.min(100, pct));
+}
+
+// Build a single rate-limit segment with pacing + burn + reset.
+// Examples:
+//   "session:31%/42% +0.4/m ~3h43m"  (full)
+//   "s:31%/42% +0.4/m ~3h43m"        (short labels)
+//   "session:31% ~3h43m"             (degraded: no pacing, no burn)
+//   "session:31%"                    (minimum)
+function buildLimitSegment(entry, labelFull, labelShort, opts) {
   if (!entry || entry.utilization == null) return null;
+  const {
+    useShort = false,
+    includePacing = true,
+    includeBurn = true,
+    includeReset = true,
+    exact = true,
+  } = opts || {};
+  const label = useShort ? labelShort : labelFull;
   const pct = Number(entry.utilization);
+  const rounded = Math.round(pct);
   const color = getColorForUtilization(pct);
-  const resetStr = formatResetTime(entry.resets_at, exact);
-  let segment = `${c.dimWhite}${label}:${c.reset}${color}${Math.round(pct)}%${c.reset}`;
-  if (entry.burn) segment += ` ${c.dim}${entry.burn}${c.reset}`;
-  if (resetStr) segment += ` ${c.dim}~${resetStr}${c.reset}`;
+
+  let segment = `${c.dimWhite}${label}:${c.reset}${color}${rounded}%${c.reset}`;
+
+  if (includePacing && entry.pacing != null) {
+    // Color pacing comparison: red if over-pace (>+5%), green if under (<-5%), dim otherwise.
+    const diff = rounded - entry.pacing;
+    let pColor = c.dim;
+    if (diff > 5) pColor = c.redNorm;
+    else if (diff < -5) pColor = c.greenNorm;
+    segment += `${pColor}/${entry.pacing}%${c.reset}`;
+  }
+  if (includeBurn && entry.burn) {
+    segment += ` ${c.dim}${entry.burn}${c.reset}`;
+  }
+  if (includeReset) {
+    const resetStr = formatResetTime(entry.resets_at, exact);
+    if (resetStr) segment += ` ${c.dim}~${resetStr}${c.reset}`;
+  }
   return segment;
 }
 
-// Merge OAuth usage data (authoritative for sub-limits) with cache-fix data
-// (fresher source for 5h/7d + burn rates + TTL/cache extras).
-// Returns a normalized structure:
-//   { five_hour, seven_day, seven_day_sonnet, seven_day_opus, extras }
-// where each limit is { utilization (0-100), resets_at (ISO), burn (string) }
-function mergeRateData(oauthData, cfData) {
+// Merge OAuth usage data with claude-code-cache-fix data into a unified
+// semantic structure. Cross-account safety via expectedOrgId gate.
+//
+// Output:
+//   {
+//     session: { utilization, resets_at, burn, pacing } | null,   // 5h rolling
+//     week:    { utilization, resets_at, burn, pacing } | null,   // 7d rolling
+//     sonnet:  { utilization, resets_at, pacing } | null,         // sub-limit
+//     opus:    { utilization, resets_at, pacing } | null,         // sub-limit
+//     design:  { utilization, resets_at, pacing } | null,         // seven_day_omelette
+//     extras:  { ttl, hit, cacheCreation, cacheRead, peak, overage },
+//     extra_usage: { usedCredits, monthlyLimit, enabled } | null,
+//     cfRejected: boolean,  // true when cache-fix data was dropped for org mismatch
+//   }
+//
+// Priority: cache-fix wins for session/week ONLY when (a) its reset is in the
+// future AND (b) its org_id matches expectedOrgId (prevents cross-account leak
+// after relogin). Sub-limits and design are OAuth-only.
+function mergeRateData(oauthData, cfData, expectedOrgId) {
   const out = {
-    five_hour: null,
-    seven_day: null,
-    seven_day_sonnet: null,
-    seven_day_opus: null,
-    extras: {
-      ttl: null,
-      hit: null,
-      cacheCreation: 0,
-      cacheRead: 0,
-      peak: false,
-      overage: '',
-    },
+    session: null,
+    week: null,
+    sonnet: null,
+    opus: null,
+    design: null,
+    extras: { ttl: null, hit: null, cacheCreation: 0, cacheRead: 0, peak: false, overage: '' },
+    extra_usage: null,
+    cfRejected: false,
   };
 
-  // Two distinct clocks:
-  // - nowMs: anchor for burn-rate computation. Prefers cache-fix's own `ts`
-  //   (when the interceptor last wrote) so rate reflects the utilization %
-  //   at the moment of measurement rather than extrapolating with real-time.
-  // - realNowMs: wall-clock used for reset-expiry gating. Using nowMs here
-  //   would let stale cfData (old `ts`) win even when the reset window has
-  //   already rolled over since that write.
-  const nowMs = (cfData && cfData.ts)
-    ? (new Date(cfData.ts).getTime() || Date.now())
+  // Org gate: fail-closed when we cannot verify the cache-fix org matches the
+  // active profile. Two rejection cases:
+  //  (1) Profile fetch failed or user is logged out (expectedOrgId empty) —
+  //      we cannot verify, so we cannot trust cache-fix (it may contain stale
+  //      headers from a prior account).
+  //  (2) cfData declares a different org than the active profile — relogin
+  //      stale-file scenario.
+  // A cache-fix record WITHOUT an org_id claim is permitted when the profile
+  // is verified (older cache-fix versions may not populate this field); it
+  // will only render the current profile's usage because OAuth data wins
+  // any disputed fields.
+  let cfUsable = cfData;
+  if (cfUsable) {
+    const cfOrg = (cfUsable._extras && cfUsable._extras.org_id) || '';
+    const cannotVerify = !expectedOrgId;
+    const orgMismatch = cfOrg && expectedOrgId && cfOrg !== expectedOrgId;
+    if (cannotVerify || orgMismatch) {
+      out.cfRejected = true;
+      cfUsable = null;
+    }
+  }
+
+  // nowMs anchors burn-rate to when cache-fix last wrote; realNowMs gates expiry.
+  const nowMs = (cfUsable && cfUsable.ts)
+    ? (new Date(cfUsable.ts).getTime() || Date.now())
     : Date.now();
   const realNowMs = Date.now();
 
-  // 5h — prefer cache-fix only when its reset timestamp is still in the future
-  // (expired cfData means the window rolled over; OAuth with expireResetLimits
-  //  will show the actual 0% for the new window, which is more accurate).
-  const cf5hResetMs = cfData ? Number(cfData.q5h_reset) * 1000 : 0;
-  if (cfData && cf5hResetMs > realNowMs) {
-    const pct = Math.floor((Number(cfData.q5h) || 0) * 100);
+  const WINDOW_5H = 5 * 3600 * 1000;
+  const WINDOW_7D = 7 * 86400 * 1000;
+
+  // session (5h) — cache-fix preferred when reset is future
+  const cf5hResetMs = cfUsable ? Number(cfUsable.q5h_reset) * 1000 : 0;
+  if (cfUsable && cf5hResetMs > realNowMs) {
+    const pct = Math.floor((Number(cfUsable.q5h) || 0) * 100);
+    const resetsAt = new Date(cf5hResetMs).toISOString();
     let burn = '';
     if (pct > 0) {
-      const windowStart = cf5hResetMs - 5 * 3600 * 1000;
+      const windowStart = cf5hResetMs - WINDOW_5H;
       const elapsedMin = (nowMs - windowStart) / 60000;
       if (elapsedMin > 1) burn = `+${(pct / elapsedMin).toFixed(1)}/m`;
     }
-    out.five_hour = {
-      utilization: pct,
-      resets_at: new Date(cf5hResetMs).toISOString(),
-      burn,
-    };
+    // Pacing anchors on nowMs (when utilization was measured), not realNowMs —
+    // prevents "under pace" false-positive when cfData.ts is a few minutes old.
+    out.session = { utilization: pct, resets_at: resetsAt, burn, pacing: computePacing(resetsAt, WINDOW_5H, nowMs) };
   } else if (oauthData && oauthData.five_hour) {
-    out.five_hour = {
-      utilization: oauthData.five_hour.utilization,
-      resets_at: oauthData.five_hour.resets_at,
-      burn: '',
-    };
+    const fh = oauthData.five_hour;
+    // OAuth data is fetched now → nowMs ≈ realNowMs anyway; use nowMs for consistency.
+    out.session = { utilization: fh.utilization, resets_at: fh.resets_at, burn: '', pacing: computePacing(fh.resets_at, WINDOW_5H, nowMs) };
   }
 
-  // 7d — same priority (future-reset gate against wall-clock, not cfData.ts)
-  const cf7dResetMs = cfData ? Number(cfData.q7d_reset) * 1000 : 0;
-  if (cfData && cf7dResetMs > realNowMs) {
-    const pct = Math.floor((Number(cfData.q7d) || 0) * 100);
+  // week (7d) — same priority
+  const cf7dResetMs = cfUsable ? Number(cfUsable.q7d_reset) * 1000 : 0;
+  if (cfUsable && cf7dResetMs > realNowMs) {
+    const pct = Math.floor((Number(cfUsable.q7d) || 0) * 100);
+    const resetsAt = new Date(cf7dResetMs).toISOString();
     let burn = '';
     if (pct > 0) {
-      const windowStart = cf7dResetMs - 7 * 86400 * 1000;
+      const windowStart = cf7dResetMs - WINDOW_7D;
       const elapsedMin = (nowMs - windowStart) / 60000;
       if (elapsedMin > 1) burn = `+${(pct / (elapsedMin / 60)).toFixed(1)}/hr`;
     }
-    out.seven_day = {
-      utilization: pct,
-      resets_at: new Date(cf7dResetMs).toISOString(),
-      burn,
-    };
+    out.week = { utilization: pct, resets_at: resetsAt, burn, pacing: computePacing(resetsAt, WINDOW_7D, nowMs) };
   } else if (oauthData && oauthData.seven_day) {
-    out.seven_day = {
-      utilization: oauthData.seven_day.utilization,
-      resets_at: oauthData.seven_day.resets_at,
-      burn: '',
-    };
+    const sd = oauthData.seven_day;
+    out.week = { utilization: sd.utilization, resets_at: sd.resets_at, burn: '', pacing: computePacing(sd.resets_at, WINDOW_7D, nowMs) };
   }
 
-  // Sub-limits — OAuth-only (unified cache-fix headers have no per-model breakdown)
+  // Sub-limits + design — OAuth-only (unified cache-fix headers have no per-model breakdown)
   if (oauthData) {
     if (oauthData.seven_day_sonnet) {
-      out.seven_day_sonnet = {
-        utilization: oauthData.seven_day_sonnet.utilization,
-        resets_at: oauthData.seven_day_sonnet.resets_at,
-        burn: '',
-      };
+      const s = oauthData.seven_day_sonnet;
+      out.sonnet = { utilization: s.utilization, resets_at: s.resets_at, pacing: computePacing(s.resets_at, WINDOW_7D, nowMs) };
     }
     if (oauthData.seven_day_opus) {
-      out.seven_day_opus = {
-        utilization: oauthData.seven_day_opus.utilization,
-        resets_at: oauthData.seven_day_opus.resets_at,
-        burn: '',
+      const o = oauthData.seven_day_opus;
+      out.opus = { utilization: o.utilization, resets_at: o.resets_at, pacing: computePacing(o.resets_at, WINDOW_7D, nowMs) };
+    }
+    // Claude Design lives under Anthropic's internal codename `seven_day_omelette`.
+    // Only appears for accounts with the feature flag (claude_ai_omelette_enabled);
+    // skip entries without a real reset timestamp to avoid rendering "design:0% ~NaN".
+    if (oauthData.seven_day_omelette && oauthData.seven_day_omelette.resets_at) {
+      const d = oauthData.seven_day_omelette;
+      out.design = { utilization: d.utilization, resets_at: d.resets_at, pacing: computePacing(d.resets_at, WINDOW_7D, nowMs) };
+    }
+    // Extra usage (monetary overage) — monthlyLimit is in cents.
+    if (oauthData.extra_usage) {
+      const eu = oauthData.extra_usage;
+      out.extra_usage = {
+        usedCredits: Number(eu.used_credits) || 0,
+        monthlyLimit: Number(eu.monthly_limit) || 0,
+        enabled: Boolean(eu.is_enabled),
       };
     }
   }
 
-  // Cache-fix extras
-  if (cfData) {
-    const ex = cfData._extras || { cache: {}, peak_hour: false };
+  // Cache-fix extras — regardless of whether cfData won the 5h/7d battle,
+  // TTL/hit/PEAK/OVERAGE still useful IF org matches (already gated above).
+  if (cfUsable) {
+    const ex = cfUsable._extras || { cache: {}, peak_hour: false };
     const cache = ex.cache || {};
     out.extras.ttl = cache.ttl_tier || null;
     out.extras.hit = (cache.hit_rate != null && cache.hit_rate !== '' && cache.hit_rate !== 'N/A')
@@ -558,7 +640,7 @@ function mergeRateData(oauthData, cfData) {
     out.extras.cacheCreation = Number(cache.cache_creation) || 0;
     out.extras.cacheRead = Number(cache.cache_read) || 0;
     out.extras.peak = Boolean(ex.peak_hour);
-    out.extras.overage = cfData.qoverage || '';
+    out.extras.overage = cfUsable.qoverage || '';
   }
 
   return out;
@@ -601,17 +683,35 @@ function buildExtrasTail(extras, flags) {
   return tail;
 }
 
-// Assemble the unified rate-limit Line 4 with graceful degradation.
-// Keeps at minimum: 5h:X% | 7d:X% (or whichever is available).
+// Assemble the unified rate-limit Line 4 with 10-step graceful degradation.
+// Semantic labels: session/week/sonnet/opus/design. Short-labels mode swaps
+// to s/w/son/opus/des for denser terminals.
+//
+// Chain (widest → narrowest):
+//  L0 full: session:31%/42% +0.4/m ~3h43m | week:… | sonnet:22% | design:0% | TTL:1h 99% | PEAK
+//  L1 short labels (s/w/son/des): same info, ~16 chars saved
+//  L2 drop PEAK/OVERAGE markers
+//  L3 drop TTL hit %
+//  L4 drop TTL entirely
+//  L5 drop design
+//  L6 drop pacing /NN%
+//  L7 drop burn rates
+//  L8 drop reset times
+//  L9 drop sub-limits (sonnet/opus) — minimum: s:31% | w:78%
 function formatRateLimitLine(merged, termWidth) {
   if (!merged) return '';
   const exact = process.env.CONTEXTBRICKS_RESET_EXACT !== '0';
-  const maxWidth = Math.max(40, termWidth || 80);
+  const maxWidth = Math.max(20, termWidth || 80);
+  const forceShort = (process.env.CONTEXTBRICKS_LABELS || '').toLowerCase() === 'short';
 
   function build(opts) {
     const {
+      useShort = false,
+      includePacing = true,
       includeBurn = true,
+      includeReset = true,
       includeSubLimits = true,
+      includeDesign = true,
       includeTTL = true,
       includeIdleWarning = true,
       includeHit = true,
@@ -619,19 +719,18 @@ function formatRateLimitLine(merged, termWidth) {
       includeOverage = true,
     } = opts;
 
-    const toSeg = (entry, label) => {
-      if (!entry) return null;
-      const e = includeBurn ? entry : { ...entry, burn: '' };
-      return buildLimitSegment(e, label, exact);
-    };
+    const segOpts = { useShort, includePacing, includeBurn, includeReset, exact };
 
     const segs = [
-      toSeg(merged.five_hour, '5h'),
-      toSeg(merged.seven_day, '7d'),
+      buildLimitSegment(merged.session, 'session', 's', segOpts),
+      buildLimitSegment(merged.week, 'week', 'w', segOpts),
     ];
     if (includeSubLimits) {
-      segs.push(toSeg(merged.seven_day_sonnet, 'sonnet'));
-      segs.push(toSeg(merged.seven_day_opus, 'opus'));
+      segs.push(buildLimitSegment(merged.sonnet, 'sonnet', 'son', { ...segOpts, includeBurn: false, includeReset: true }));
+      segs.push(buildLimitSegment(merged.opus, 'opus', 'opus', { ...segOpts, includeBurn: false, includeReset: true }));
+    }
+    if (includeDesign) {
+      segs.push(buildLimitSegment(merged.design, 'design', 'des', { ...segOpts, includeBurn: false, includeReset: false }));
     }
     let line = segs.filter(Boolean).join(' | ');
     line += buildExtrasTail(merged.extras, {
@@ -640,16 +739,19 @@ function formatRateLimitLine(merged, termWidth) {
     return line;
   }
 
-  // Degradation chain: widest → narrowest
+  // Degradation chain. Always honors forceShort by starting at short-labels level.
+  const baseShort = forceShort;
   const fallbacks = [
-    { },                                                // full
-    { includeIdleWarning: false },                      // drop idle-warning text
-    { includeIdleWarning: false, includeHit: false },   // drop cache hit rate
-    { includeIdleWarning: false, includeHit: false, includeBurn: false },  // drop burn rates
-    { includeIdleWarning: false, includeHit: false, includeBurn: false, includePeak: false },
-    { includeIdleWarning: false, includeHit: false, includeBurn: false, includePeak: false, includeOverage: false },
-    { includeIdleWarning: false, includeHit: false, includeBurn: false, includePeak: false, includeOverage: false, includeTTL: false },
-    { includeIdleWarning: false, includeHit: false, includeBurn: false, includePeak: false, includeOverage: false, includeTTL: false, includeSubLimits: false },
+    { useShort: baseShort },                                                                 // L0/L1 full (short if forced)
+    { useShort: true },                                                                       // L1 short labels
+    { useShort: true, includePeak: false, includeOverage: false },                            // L2 drop markers
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false },         // L3 drop hit%
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false }, // L4 drop TTL
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false }, // L5 drop design
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false }, // L6 drop pacing
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false, includeBurn: false }, // L7 drop burn
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false }, // L8 drop reset
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false, includeSubLimits: false }, // L9 minimum
   ];
 
   let line = '';
@@ -660,17 +762,22 @@ function formatRateLimitLine(merged, termWidth) {
   return line; // return narrowest even if still over
 }
 
-// Read extras (cache tier, hit rate, peak_hour) from quota-status.json if present
+// Read extras (cache tier, hit rate, peak_hour, org_id) from quota-status.json.
+// org_id is used downstream to reject cache-fix data written under a different
+// OAuth account (relogin scenario where quota-status.json still reflects the
+// previous account's headers).
 function readQuotaStatusExtras(qsPath) {
   try {
     const raw = fs.readFileSync(qsPath, 'utf8');
     const qs = JSON.parse(raw);
+    const headers = (qs && qs.all_headers && typeof qs.all_headers === 'object') ? qs.all_headers : {};
     return {
       cache: (qs && qs.cache && typeof qs.cache === 'object') ? qs.cache : {},
       peak_hour: Boolean(qs && qs.peak_hour),
+      org_id: headers['anthropic-organization-id'] || '',
     };
   } catch {
-    return { cache: {}, peak_hour: false };
+    return { cache: {}, peak_hour: false, org_id: '' };
   }
 }
 
@@ -724,6 +831,7 @@ function readCacheFixQuota(input) {
     const qs = JSON.parse(raw);
     const fh = qs.five_hour || {};
     const sd = qs.seven_day || {};
+    const headers = (qs.all_headers && typeof qs.all_headers === 'object') ? qs.all_headers : {};
     return {
       q5h: Number(fh.utilization) || 0,
       q7d: Number(sd.utilization) || 0,
@@ -734,6 +842,7 @@ function readCacheFixQuota(input) {
       _extras: {
         cache: (qs.cache && typeof qs.cache === 'object') ? qs.cache : {},
         peak_hour: Boolean(qs.peak_hour),
+        org_id: headers['anthropic-organization-id'] || '',
       },
     };
   } catch {
@@ -902,12 +1011,16 @@ function main() {
   // Read OAuth token once — reused for profile (Line 1 tail) and usage (Line 4).
   const oauthToken = readOAuthToken();
 
+  // Fetch profile once (used for both the @username tail and the org-gate that
+  // rejects cross-account cache-fix data on Line 4).
+  const profile = fetchUserProfile(oauthToken, input);
+  const expectedOrgId = getPath(profile, 'organization.uuid') || '';
+
   // Optional: OAuth account identifier (rightmost segment, drops first on overflow)
   const userFormat = (process.env.CONTEXTBRICKS_USER || 'username').toLowerCase();
   const userEnabled = userFormat !== '0' && userFormat !== 'off' && userFormat !== 'false';
   let userSegment = '';
   if (userEnabled) {
-    const profile = fetchUserProfile(oauthToken, input);
     const label = formatUserLabel(profile, userFormat);
     if (label) userSegment = ` ${c.dim}${label}${c.reset}`;
   }
@@ -1026,6 +1139,30 @@ function main() {
     brickLine += ` | ${c.yellowNorm}$${costFormatted}${c.reset}`;
   }
 
+  // Fetch rate-limit data early so we can append extra_usage to Line 3 (billing
+  // stays with cost), AND render Line 4 below.
+  const showLimits = process.env.CONTEXTBRICKS_SHOW_LIMITS !== '0';
+  let merged = null;
+  if (showLimits) {
+    const oauthData = fetchUsageData(oauthToken, input);
+    const useCacheFix = process.env.CONTEXTBRICKS_SHOW_CACHE_FIX !== '0';
+    const cfData = useCacheFix ? readCacheFixQuota(input) : null;
+    merged = mergeRateData(oauthData, cfData, expectedOrgId);
+  }
+
+  // Extra usage (monthly overage) on Line 3 — billing info next to session cost.
+  // Graceful degradation: if Line 3 would overflow, drop extra first (handled by
+  // the caller). For now append unconditionally; fine-grained width handling is
+  // for a later pass if it becomes a problem in practice.
+  if (merged && merged.extra_usage && merged.extra_usage.enabled) {
+    // toFixed(2) preserves cent-level precision so $0.50 doesn't round to $1.
+    // Limits are typically integers (e.g. $20.00), so the trailing .00 is
+    // accepted as consistent formatting rather than verbose noise.
+    const used = (merged.extra_usage.usedCredits / 100).toFixed(2);
+    const limit = (merged.extra_usage.monthlyLimit / 100).toFixed(2);
+    brickLine += ` | ${c.dim}extra:${c.reset}${c.yellowNorm}$${used}/$${limit}${c.reset}`;
+  }
+
   // Output all lines
   process.stdout.write(line1 + '\n');
   if (line2) {
@@ -1034,12 +1171,7 @@ function main() {
   process.stdout.write(brickLine + '\n');
 
   // Line 4: Unified rate-limit line (OAuth + cache-fix merge)
-  const showLimits = process.env.CONTEXTBRICKS_SHOW_LIMITS !== '0';
-  if (showLimits) {
-    const oauthData = fetchUsageData(oauthToken, input);
-    const useCacheFix = process.env.CONTEXTBRICKS_SHOW_CACHE_FIX !== '0';
-    const cfData = useCacheFix ? readCacheFixQuota(input) : null;
-    const merged = mergeRateData(oauthData, cfData);
+  if (showLimits && merged) {
     const line4 = formatRateLimitLine(merged, termWidth);
     if (line4) {
       process.stdout.write(line4 + '\n');

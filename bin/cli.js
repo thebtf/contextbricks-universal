@@ -221,10 +221,12 @@ function test() {
       total_lines_removed: 23,
     },
     _mock_rate_limits: {
-      five_hour: { utilization: 64.0, resets_at: new Date(now + 23 * 60000).toISOString() },
-      seven_day: { utilization: 57.0, resets_at: new Date(now + 2 * 86400000).toISOString() },
-      seven_day_sonnet: { utilization: 9.0, resets_at: new Date(now + 4 * 86400000).toISOString() },
+      five_hour: { utilization: 27.0, resets_at: new Date(now + 3 * 3600000 + 44 * 60000).toISOString() },
+      seven_day: { utilization: 77.0, resets_at: new Date(now + 4 * 86400000 + 13 * 3600000).toISOString() },
+      seven_day_sonnet: { utilization: 22.0, resets_at: new Date(now + 4 * 86400000 + 11 * 3600000).toISOString() },
       seven_day_opus: null,
+      seven_day_omelette: { utilization: 0.0, resets_at: new Date(now + 4 * 86400000 + 13 * 3600000).toISOString() },
+      extra_usage: { is_enabled: true, monthly_limit: 2000, used_credits: 0, utilization: null, currency: 'USD' },
     },
     _mock_profile: {
       account: {
@@ -233,18 +235,19 @@ function test() {
         full_name: 'Test User',
         has_claude_max: true,
       },
-      organization: { organization_type: 'claude_max' },
+      organization: { uuid: 'mock-org-uuid-1', organization_type: 'claude_max' },
     },
     _mock_cache_fix: {
-      q5h: 0.17,
-      q7d: 0.51,
-      q5h_reset: Math.floor((now + 22 * 60000) / 1000),
-      q7d_reset: Math.floor((now + 2 * 86400000) / 1000),
+      q5h: 0.27,
+      q7d: 0.77,
+      q5h_reset: Math.floor((now + 3 * 3600000 + 44 * 60000) / 1000),
+      q7d_reset: Math.floor((now + 4 * 86400000 + 13 * 3600000) / 1000),
       qoverage: '',
       ts: new Date(now).toISOString(),
       _extras: {
-        cache: { ttl_tier: '1h', hit_rate: '98', cache_creation: 1900, cache_read: 135000 },
+        cache: { ttl_tier: '1h', hit_rate: '99.9', cache_creation: 491, cache_read: 783950 },
         peak_hour: false,
+        org_id: 'mock-org-uuid-1',
       },
     },
   });

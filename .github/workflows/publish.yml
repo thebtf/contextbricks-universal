@@ -46,18 +46,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          # Node 22 from setup-node@v4 may ship npm 10.x which does NOT support
-          # Trusted Publishing. We upgrade npm explicitly in the next step.
-          node-version: '22'
+          # Node 24 ships npm >= 11.x which supports Trusted Publishing OIDC
+          # out of the box. An earlier attempt used Node 22 + `npm install -g
+          # npm@latest` in-place, which fails on this runner with
+          # `MODULE_NOT_FOUND: promise-retry` (known self-upgrade issue between
+          # npm 10.x and 11.x on prebuilt hostedtoolcache images).
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
 
-      - name: Upgrade npm to a trusted-publishing-capable version
-        # Trusted Publishing with OIDC requires npm >= 11.5.1. Without this
-        # upgrade the publish step gets a silent 404 from the registry
-        # because older npm tries token auth instead of the OIDC exchange.
+      - name: Report Node + npm versions
+        # Visible sanity check in the action log — fails later steps with a
+        # clear signal if the runner ever regresses below the supported npm.
         run: |
-          npm install -g npm@latest
+          node --version
           npm --version
 
       - name: Verify tag matches package.json version

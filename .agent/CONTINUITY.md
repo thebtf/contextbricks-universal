@@ -19,7 +19,35 @@
 
 ## Now
 
-Nothing in flight. Next ship is unlocked: any `git push origin vX.Y.Z` (for bumped package.json version) auto-publishes to npm via the workflow.
+Nothing in flight. Session at natural checkpoint — v4.6.0 shipped end-to-end (GH tag + GH release + npm with provenance).
+
+## Next (when resuming)
+
+- Verify `Built and signed on GitHub Actions` badge renders on https://www.npmjs.com/package/contextbricks-universal after npm cache refreshes.
+- First real-world post-release validation: on the next bump (v4.6.1 / v4.7.0), confirm the auto-publish workflow still succeeds end-to-end without manual intervention.
+- Optionally scan engram observations for residual username traces if user returns with follow-up on OPSEC concern (earlier session had `derailed13` in prior memories — local-only, but removable with `delete_memory` + bulk-mark-superseded).
+
+## Blockers
+
+None.
+
+## Deferred / Open (carried forward)
+
+- **Test fixture expansion**: `_mock_cache_fix` covers TTL:1h + hit rate + burn rate. TTL:5m red branch + `⚠ idle >Nm rebuild` warning + PEAK (yellow) + OVERAGE marker still only verified by code review, not by automated mock test. Add dedicated fixture variants to `bin/cli.js test` to exercise all branches deterministically.
+- **git author-email history**: if `derailed13@gmail.com` was ever configured as `git config user.email`, it's in every historical commit's `%ae` field. Not addressed this session (would require `git filter-repo` + force-push of ALL refs, breaks every clone/fork). Flagged to user at force-push time, user chose force-push of offending commit-body only.
+- **Recurring CR re-review retro-fix**: PR #11 had CodeRabbit in "review in progress" at merge time. If CR eventually posts actionable findings on the now-merged workflow, handle as retro-fix PR.
+
+## Resumability Test
+
+A future agent running `/session --load` on this CONTINUITY.md should, in the first 5 actions:
+
+1. Read this file → see v4.6.0 shipped, no in-flight work, next step is "verify badge" or "next release".
+2. Run `npm view contextbricks-universal version` → confirm `4.6.0` (or higher if another release shipped).
+3. Run `git log --oneline -5` → see `4065b78 docs(continuity) → 86f27b0 ci: Node 24 → 514f488 npm upgrade → f3ef05e publish workflow → c766d8a username scrub`.
+4. Run `gh run list --workflow publish.yml --limit 3` → confirm latest run was `success`.
+5. Run `gh release view v4.6.0 --json tagName,name,publishedAt,url` → confirm release is live with correct tag.
+
+All context needed to resume is encoded in this file + git + GitHub + npm. No tribal knowledge required.
 
 ## What This Project Does
 

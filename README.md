@@ -8,7 +8,7 @@
 **Works on Windows, Linux, and macOS** — pure Node.js, no bash or jq required.
 
 ```
-[Opus 4.7 (1m)] claude-skills:main *↑2 | +145/-23 @derailed13
+[Opus 4.7 (1m)] claude-skills:main *↑2 | +145/-23 @alice
 [5f2ce67] Remove auth-js skill
 [■■■■■■■■■■■■■□□□□□□□□□□□□□□□□□] 43% | 113k free | 0h12m | $0.87 | extra:$0.00/$20.00
 session:27%/25% +0.4/m ~3h43m | week:77%/35% +1.3/hr ~4d12h | sonnet:22%/36% | design:0%/35% | TTL:1h 99.9%
@@ -80,7 +80,7 @@ contextbricks install
 ### Line 1 — Model + Git + Changes + OAuth Account
 
 ```
-[Opus 4.6 (1m)] claude-skills:main *↑2 | +145/-23 @derailed13
+[Opus 4.6 (1m)] claude-skills:main *↑2 | +145/-23 @alice
 ```
 
 Model label auto-shortens `(NM context)` → `(Nm)` (e.g. `(1M context)` → `(1m)`, `(200K context)` → `(200k)`).
@@ -89,9 +89,9 @@ The trailing `@username` is fetched from `GET /api/oauth/profile` (same OAuth to
 
 | Value | Shows |
 |---|---|
-| `username` (default) | `@derailed13` — local-part of email |
-| `email` | `@derailed13@gmail.com` — full email |
-| `name` | `@Vlad` — OAuth `display_name` (falls back to `full_name`) |
+| `username` (default) | `@alice` — local-part of email |
+| `email` | `@alice@example.com` — full email |
+| `name` | `@Alice` — OAuth `display_name` (falls back to `full_name`) |
 | `off` / `0` / `false` | Hidden |
 
 ### Line 2 — Commit Details

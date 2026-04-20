@@ -590,14 +590,13 @@ function buildRateView(oauthData, cfExtras, nowMs) {
     }
   }
 
-  // Cache-fix extras: TTL/hit/PEAK/OVERAGE only — cfExtras already staleness-gated by readCacheFixExtras
+  // Cache-fix extras: TTL/hit/PEAK/OVERAGE only — already staleness-gated and
+  // normalized by readCacheFixExtras → gateAndNormalize. No re-normalization here.
   if (cfExtras) {
-    out.extras.ttl = cfExtras.ttl_tier || null;
-    out.extras.hit = (cfExtras.hit_rate != null && cfExtras.hit_rate !== '' && cfExtras.hit_rate !== 'N/A')
-      ? cfExtras.hit_rate
-      : null;
-    out.extras.peak = Boolean(cfExtras.peak_hour);
-    out.extras.overage = cfExtras.overage || '';
+    out.extras.ttl = cfExtras.ttl_tier;
+    out.extras.hit = cfExtras.hit_rate;
+    out.extras.peak = cfExtras.peak_hour;
+    out.extras.overage = cfExtras.overage;
   }
 
   return out;
@@ -680,6 +679,9 @@ function formatRateLimitLine(merged, termWidth) {
       segs.push(buildLimitSegment(merged.design, 'design', 'des', { ...segOpts, includeBurn: false, includeReset: false }));
     }
     let line = segs.filter(Boolean).join(' | ');
+    // Never emit orphan extras-tail without at least one OAuth quota segment.
+    // Guards the OAuth-unavailable + fresh-cache-fix case from rendering "| TTL:1h 99.9%" alone.
+    if (!line) return '';
     line += buildExtrasTail(merged.extras, {
       includeTTL, includeHit, includePeak, includeOverage,
     });

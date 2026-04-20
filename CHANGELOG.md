@@ -7,6 +7,7 @@
 
 ### Refactored
 - **OAuth-authoritative data model** (ADR-001): 5h/7d/sonnet/opus/design always from OAuth `/api/oauth/usage`. Cache-fix cannot influence quota percentages.
+- **Removed dead idle-rebuild warning** (`⚠ idle >5m = NK rebuild`): was unreachable after v4.6.0 return-shape change zeroed the `cacheCreation`/`cacheRead` fields. Dead code cleaned up.
 - **Cache-fix extras only** (ADR-002): `readCacheFixExtras` (renamed from `readCacheFixQuota`) returns only TTL tier, cache hit rate, PEAK, OVERAGE — no quota fields.
 - **30-minute staleness gate** (ADR-003): `readCacheFixExtras` returns null when `ts` is older than 30 minutes. Future timestamps (clock skew) treated as fresh.
 - **Removed org-id gate** (ADR-004): `expectedOrgId`, `cfRejected`, `cannotVerify`/`orgMismatch` logic deleted. No longer needed since cache-fix cannot influence quota values.

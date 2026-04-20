@@ -206,67 +206,94 @@ function test() {
   console.log(`${c.cyan}Testing statusline with sample data...${c.reset}\n`);
 
   const now = Date.now();
-  const sampleData = JSON.stringify({
-    model: { display_name: 'Claude Opus 4.6 (1M context)' },
-    workspace: { current_dir: process.cwd() },
-    context_window: {
-      context_window_size: 1000000,
-      used_percentage: 43.5,
-      remaining_percentage: 56.5,
-    },
-    cost: {
-      total_duration_ms: 765000,
-      total_cost_usd: 0.87,
-      total_lines_added: 145,
-      total_lines_removed: 23,
-    },
-    _mock_rate_limits: {
-      five_hour: { utilization: 27.0, resets_at: new Date(now + 3 * 3600000 + 44 * 60000).toISOString() },
-      seven_day: { utilization: 77.0, resets_at: new Date(now + 4 * 86400000 + 13 * 3600000).toISOString() },
-      seven_day_sonnet: { utilization: 22.0, resets_at: new Date(now + 4 * 86400000 + 11 * 3600000).toISOString() },
-      seven_day_opus: null,
-      seven_day_omelette: { utilization: 0.0, resets_at: new Date(now + 4 * 86400000 + 13 * 3600000).toISOString() },
-      extra_usage: { is_enabled: true, monthly_limit: 2000, used_credits: 0, utilization: null, currency: 'USD' },
-    },
-    _mock_profile: {
-      account: {
-        email: 'you@example.com',
-        display_name: 'Tester',
-        full_name: 'Test User',
-        has_claude_max: true,
-      },
-      organization: { uuid: 'mock-org-uuid-1', organization_type: 'claude_max' },
-    },
-    _mock_cache_fix: {
-      q5h: 0.27,
-      q7d: 0.77,
-      q5h_reset: Math.floor((now + 3 * 3600000 + 44 * 60000) / 1000),
-      q7d_reset: Math.floor((now + 4 * 86400000 + 13 * 3600000) / 1000),
-      qoverage: '',
-      ts: new Date(now).toISOString(),
-      _extras: {
-        cache: { ttl_tier: '1h', hit_rate: '99.9', cache_creation: 491, cache_read: 783950 },
-        peak_hour: false,
-        org_id: 'mock-org-uuid-1',
-      },
-    },
-  });
 
-  const result = spawnSync(process.execPath, [STATUSLINE_SCRIPT], {
-    input: sampleData,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 10000,
-  });
-
-  if (result.stdout) {
-    process.stdout.write(result.stdout);
-  }
-  if (result.stderr) {
-    process.stderr.write(result.stderr);
+  function makeBaseData(overrides) {
+    return JSON.stringify(Object.assign({
+      model: { display_name: 'Claude Opus 4.6 (1M context)' },
+      workspace: { current_dir: process.cwd() },
+      context_window: {
+        context_window_size: 1000000,
+        used_percentage: 43.5,
+        remaining_percentage: 56.5,
+      },
+      cost: {
+        total_duration_ms: 765000,
+        total_cost_usd: 0.87,
+        total_lines_added: 145,
+        total_lines_removed: 23,
+      },
+      _mock_rate_limits: {
+        five_hour: { utilization: 27.0, resets_at: new Date(now + 3 * 3600000 + 44 * 60000).toISOString() },
+        seven_day: { utilization: 45.0, resets_at: new Date(now + 4 * 86400000 + 13 * 3600000).toISOString() },
+        seven_day_sonnet: { utilization: 22.0, resets_at: new Date(now + 4 * 86400000 + 11 * 3600000).toISOString() },
+        seven_day_opus: null,
+        seven_day_omelette: { utilization: 0.0, resets_at: new Date(now + 4 * 86400000 + 13 * 3600000).toISOString() },
+        extra_usage: { is_enabled: true, monthly_limit: 2000, used_credits: 0, utilization: null, currency: 'USD' },
+      },
+      _mock_profile: {
+        account: {
+          email: 'you@example.com',
+          display_name: 'Tester',
+          full_name: 'Test User',
+          has_claude_max: true,
+        },
+        organization: { uuid: 'mock-org-uuid-1', organization_type: 'claude_max' },
+      },
+    }, overrides));
   }
 
-  console.log(`\n${c.dim}--- Test complete ---${c.reset}`);
+  const freshTs = new Date(now).toISOString();
+  const staleTs = new Date(now - 31 * 60 * 1000).toISOString();
+
+  const variants = [
+    {
+      label: 'oauthOnly — no cache-fix extras',
+      data: makeBaseData({ _mock_cache_fix: null }),
+    },
+    {
+      label: 'freshExtras — TTL/hit/PEAK suffix expected',
+      data: makeBaseData({
+        _mock_cache_fix: {
+          ttl_tier: '1h',
+          hit_rate: '99.9',
+          peak_hour: false,
+          overage: '',
+          ts: freshTs,
+        },
+      }),
+    },
+    {
+      label: 'staleExtras — staleness gate fires (31 min old), no extras suffix',
+      data: makeBaseData({
+        _mock_cache_fix: {
+          ttl_tier: '1h',
+          hit_rate: '99.9',
+          peak_hour: false,
+          overage: '',
+          ts: staleTs,
+        },
+      }),
+    },
+    {
+      label: 'staleWhileError — OAuth 429 scenario (same as oauthOnly, no extras)',
+      data: makeBaseData({ _mock_cache_fix: null }),
+    },
+  ];
+
+  for (const variant of variants) {
+    console.log(`${c.yellow}=== ${variant.label} ===${c.reset}`);
+    const result = spawnSync(process.execPath, [STATUSLINE_SCRIPT], {
+      input: variant.data,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 10000,
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    console.log('');
+  }
+
+  console.log(`${c.dim}--- Test complete ---${c.reset}`);
 }
 
 // Main

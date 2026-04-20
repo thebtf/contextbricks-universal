@@ -22,7 +22,7 @@ session:27%/25% +0.4/m ~3h43m | week:77%/35% +1.3/hr ~4d12h | sonnet:22%/36% | d
 - **OAuth-authoritative quotas** — `session`/`week`/`sonnet`/`opus`/`design` always from Anthropic OAuth API. Optional extras (TTL/hit/PEAK/OVERAGE) from [`claude-code-cache-fix`](https://www.npmjs.com/package/claude-code-cache-fix) when fresh (<30 min)
 - **Extra usage on Line 3** — monthly overage billing `extra:$N/$M` next to session cost
 - **Burn rates** — `+0.4/m` (5h) / `+1.3/hr` (7d) from OAuth data
-- **TTL tier indicator** — `TTL:1h 99.9%` or red `TTL:5m ⚠ idle >5m = 800K rebuild`
+- **TTL tier indicator** — `TTL:1h 99.9%` (warm cache) or red `TTL:5m` (cold tier)
 - **10-step graceful degradation** — short labels (`s/w/son/des`) then drops markers → TTL → design → pacing → burn → reset → sub-limits
 - **Color gradient** — 256-color green-to-red scale based on utilization percentage
 - **Git integration** — repo, branch, commit hash, message, dirty/ahead/behind indicators
@@ -141,7 +141,6 @@ Auto-merges:
 | `design:X%` | 7-day Claude Design sub-limit (OAuth, from `seven_day_omelette`) |
 | `~22m` / `~1d23h` | Time until limit resets (exact by default) |
 | `TTL:5m` (red) / `TTL:1h` | Prompt-cache TTL tier currently served by Anthropic |
-| `⚠ idle >5m = NK rebuild` | Cold-rebuild cost warning when on 5m tier |
 | `NN%` (after TTL) | Cache hit rate |
 | `PEAK` (yellow) | Peak-hour window |
 | `OVERAGE` | Overage billing active |

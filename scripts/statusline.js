@@ -38,6 +38,7 @@ const fs = require('fs');
 const os = require('os');
 
 const MAX_STDIN_BYTES = 1024 * 1024; // 1MB safety limit
+const CACHE_FIX_MAX_AGE_MS = 30 * 60 * 1000; // 30 min — see ADR-003
 
 // Read all stdin synchronously
 function readStdin() {
@@ -527,7 +528,7 @@ function buildLimitSegment(entry, labelFull, labelShort, opts) {
 //     sonnet:  { utilization, resets_at, pacing } | null,         // sub-limit
 //     opus:    { utilization, resets_at, pacing } | null,         // sub-limit
 //     design:  { utilization, resets_at, pacing } | null,         // seven_day_omelette
-//     extras:  { ttl, hit, cacheCreation, cacheRead, peak, overage },
+//     extras:  { ttl, hit, peak, overage },
 //     extra_usage: { usedCredits, monthlyLimit, enabled } | null,
 //   }
 function buildRateView(oauthData, cfExtras, nowMs) {
@@ -537,7 +538,7 @@ function buildRateView(oauthData, cfExtras, nowMs) {
     sonnet: null,
     opus: null,
     design: null,
-    extras: { ttl: null, hit: null, cacheCreation: 0, cacheRead: 0, peak: false, overage: '' },
+    extras: { ttl: null, hit: null, peak: false, overage: '' },
     extra_usage: null,
   };
 
@@ -595,8 +596,6 @@ function buildRateView(oauthData, cfExtras, nowMs) {
     out.extras.hit = (cfExtras.hit_rate != null && cfExtras.hit_rate !== '' && cfExtras.hit_rate !== 'N/A')
       ? cfExtras.hit_rate
       : null;
-    out.extras.cacheCreation = 0;
-    out.extras.cacheRead = 0;
     out.extras.peak = Boolean(cfExtras.peak_hour);
     out.extras.overage = cfExtras.overage || '';
   }
@@ -608,7 +607,7 @@ function buildRateView(oauthData, cfExtras, nowMs) {
 // Flags control graceful degradation.
 function buildExtrasTail(extras, flags) {
   if (!extras) return '';
-  const { includeTTL = true, includeIdleWarning = true, includeHit = true,
+  const { includeTTL = true, includeHit = true,
     includePeak = true, includeOverage = true } = flags;
   let tail = '';
 
@@ -619,15 +618,6 @@ function buildExtrasTail(extras, flags) {
   if (extras.ttl && includeTTL) {
     if (extras.ttl === '5m') {
       tail += ` | \x1b[31mTTL:5m\x1b[0m`;
-      if (includeIdleWarning) {
-        const prefix = extras.cacheCreation + extras.cacheRead;
-        if (prefix > 0) {
-          const warn = prefix >= 1_000_000
-            ? `${(prefix / 1_000_000).toFixed(1)}M`
-            : `${Math.round(prefix / 1000)}K`;
-          tail += ` \x1b[31m\u26A0 idle >5m = ${warn} rebuild\x1b[0m`;
-        }
-      }
     } else {
       tail += ` | ${c.dimWhite}TTL:${c.reset}${extras.ttl}`;
     }
@@ -671,7 +661,6 @@ function formatRateLimitLine(merged, termWidth) {
       includeSubLimits = true,
       includeDesign = true,
       includeTTL = true,
-      includeIdleWarning = true,
       includeHit = true,
       includePeak = true,
       includeOverage = true,
@@ -692,7 +681,7 @@ function formatRateLimitLine(merged, termWidth) {
     }
     let line = segs.filter(Boolean).join(' | ');
     line += buildExtrasTail(merged.extras, {
-      includeTTL, includeIdleWarning, includeHit, includePeak, includeOverage,
+      includeTTL, includeHit, includePeak, includeOverage,
     });
     return line;
   }
@@ -704,12 +693,12 @@ function formatRateLimitLine(merged, termWidth) {
     { useShort: true },                                                                       // L1 short labels
     { useShort: true, includePeak: false, includeOverage: false },                            // L2 drop markers
     { useShort: true, includePeak: false, includeOverage: false, includeHit: false },         // L3 drop hit%
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false }, // L4 drop TTL
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false }, // L5 drop design
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false }, // L6 drop pacing
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false, includeBurn: false }, // L7 drop burn
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false }, // L8 drop reset
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false, includeSubLimits: false }, // L9 minimum
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false }, // L4 drop TTL
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false }, // L5 drop design
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false }, // L6 drop pacing
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false, includeBurn: false }, // L7 drop burn
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false }, // L8 drop reset
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false, includeSubLimits: false }, // L9 minimum
   ];
 
   let line = '';
@@ -733,7 +722,7 @@ function readCacheFixExtras(input) {
   if (mock !== undefined && mock !== null) {
     const ts = mock.ts || '';
     const ageMs = Date.now() - new Date(ts).getTime();
-    if (!isFinite(ageMs) || ageMs > 30 * 60 * 1000) return null;
+    if (!isFinite(ageMs) || ageMs > CACHE_FIX_MAX_AGE_MS) return null;
     return {
       ttl_tier: mock.ttl_tier || null,
       hit_rate: mock.hit_rate != null ? mock.hit_rate : null,
@@ -747,11 +736,9 @@ function readCacheFixExtras(input) {
   const jsonlPath = path.join(home, '.claude', 'claude-meter.jsonl');
   const qsPath = path.join(home, '.claude', 'quota-status.json');
 
-  const STALE_MS = 30 * 60 * 1000;
-
   function gateAndNormalize(ts, ttl_tier, hit_rate, peak_hour, overage) {
     const ageMs = Date.now() - new Date(ts).getTime();
-    if (!isFinite(ageMs) || ageMs > STALE_MS) return null;
+    if (!isFinite(ageMs) || ageMs > CACHE_FIX_MAX_AGE_MS) return null;
     // Future ts (ageMs < 0) is treated as fresh — clock skew tolerance
     return {
       ttl_tier: ttl_tier || null,

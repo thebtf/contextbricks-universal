@@ -275,7 +275,7 @@ function test() {
       }),
     },
     {
-      label: 'staleWhileError — OAuth 429 scenario (same as oauthOnly, no extras)',
+      label: 'staleWhileError — live OAuth 429 requires real API; in test env identical to oauthOnly',
       data: makeBaseData({ _mock_cache_fix: null }),
     },
   ];

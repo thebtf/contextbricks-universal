@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 
 // Claude Code Custom Status Line (Node.js / Cross-Platform)
-// v4.6.0 - Node.js rewrite for Windows + Linux + macOS
+// v4.6.1 - Node.js rewrite for Windows + Linux + macOS
 // Line 1: Model | Repo:Branch [subdir] | git status | lines changed | @user
 // Line 2: [commit] commit message
 // Line 3: Context bricks | percentage | free | duration | cost | extra:$N/$M
-// Line 4: Unified rate-limit line — merges Anthropic OAuth usage (authoritative
-//         for sub-limits + Claude Design + extra_usage) with claude-code-cache-fix
-//         data (fresher 5h/7d utilization + burn rates + TTL + cache hit rate +
-//         PEAK/OVERAGE). Labels: session/week/sonnet/opus/design with pacing
-//         target (`/NN%`) showing expected usage for elapsed-time-in-window.
-//         Cross-account safety: cache-fix data is dropped when its
-//         anthropic-organization-id differs from the active OAuth profile's org.
+// Line 4: Unified rate-limit line — OAuth API is the single authoritative source
+//         for all quota values (session/week/sonnet/opus/design). Optional extras
+//         (TTL tier, cache hit rate, PEAK, OVERAGE) from claude-code-cache-fix
+//         when fresh (< 30 min). Stale or missing cache-fix: Line 4 shows OAuth
+//         quota values without extras suffix. Labels: session/week/sonnet/opus/design
+//         with pacing target (`/NN%`) showing expected usage for elapsed time in window.
 //         Cache-fix detected via ~/.claude/claude-meter.jsonl or quota-status.json.
 //
 // Configuration via environment variables:
@@ -19,7 +18,8 @@
 //   CONTEXTBRICKS_SHOW_DIR=0     Hide subdirectory
 //   CONTEXTBRICKS_BRICKS=40      Number of bricks (default: 30)
 //   CONTEXTBRICKS_SHOW_LIMITS=0  Hide rate-limit line (default: shown)
-//   CONTEXTBRICKS_SHOW_CACHE_FIX=0  Ignore cache-fix data, use OAuth only (default: merge)
+//   CONTEXTBRICKS_SHOW_CACHE_FIX=0  Disable extras (TTL / hit rate / PEAK / OVERAGE).
+//                                   Core quota values always come from OAuth API. (default: show extras)
 //   CONTEXTBRICKS_USER=username  OAuth account display: username|email|name|off (default: username)
 //   CONTEXTBRICKS_LABELS=short   Force short labels (s/w/son/opus/des) (default: auto-degrade)
 //   CONTEXTBRICKS_RESET_EXACT=0  Approximate reset times (default: exact)
@@ -38,6 +38,7 @@ const fs = require('fs');
 const os = require('os');
 
 const MAX_STDIN_BYTES = 1024 * 1024; // 1MB safety limit
+const CACHE_FIX_MAX_AGE_MS = 30 * 60 * 1000; // 30 min — see ADR-003
 
 // Read all stdin synchronously
 function readStdin() {
@@ -462,6 +463,20 @@ function computePacing(resetsAtIso, windowMs, nowMs) {
   return Math.max(0, Math.min(100, pct));
 }
 
+// Compute burn rate for a quota window. Pure — no Date.now() inside.
+// unit: 'm' (per minute, for 5h window) | 'hr' (per hour, for 7d window).
+// Returns empty string when pct <= 0 or elapsedMin <= 1 (too early to be meaningful).
+function computeBurn(pct, resetsAtIso, windowMs, nowMs, unit) {
+  if (pct <= 0) return '';
+  const resetMs = new Date(resetsAtIso).getTime();
+  if (!isFinite(resetMs)) return '';
+  const windowStart = resetMs - windowMs;
+  const elapsedMin = (nowMs - windowStart) / 60000;
+  if (elapsedMin <= 1) return '';
+  if (unit === 'hr') return `+${(pct / (elapsedMin / 60)).toFixed(1)}/hr`;
+  return `+${(pct / elapsedMin).toFixed(1)}/m`;
+}
+
 // Build a single rate-limit segment with pacing + burn + reset.
 // Examples:
 //   "session:31%/42% +0.4/m ~3h43m"  (full)
@@ -502,8 +517,9 @@ function buildLimitSegment(entry, labelFull, labelShort, opts) {
   return segment;
 }
 
-// Merge OAuth usage data with claude-code-cache-fix data into a unified
-// semantic structure. Cross-account safety via expectedOrgId gate.
+// Build unified rate-limit view from OAuth data (authoritative for all quota values)
+// and optional cache-fix extras (TTL/hit/PEAK/OVERAGE only, already staleness-gated).
+// Pure: no I/O, no Date.now() — nowMs injected by caller.
 //
 // Output:
 //   {
@@ -512,96 +528,42 @@ function buildLimitSegment(entry, labelFull, labelShort, opts) {
 //     sonnet:  { utilization, resets_at, pacing } | null,         // sub-limit
 //     opus:    { utilization, resets_at, pacing } | null,         // sub-limit
 //     design:  { utilization, resets_at, pacing } | null,         // seven_day_omelette
-//     extras:  { ttl, hit, cacheCreation, cacheRead, peak, overage },
+//     extras:  { ttl, hit, peak, overage },
 //     extra_usage: { usedCredits, monthlyLimit, enabled } | null,
-//     cfRejected: boolean,  // true when cache-fix data was dropped for org mismatch
 //   }
-//
-// Priority: cache-fix wins for session/week ONLY when (a) its reset is in the
-// future AND (b) its org_id matches expectedOrgId (prevents cross-account leak
-// after relogin). Sub-limits and design are OAuth-only.
-function mergeRateData(oauthData, cfData, expectedOrgId) {
+function buildRateView(oauthData, cfExtras, nowMs) {
   const out = {
     session: null,
     week: null,
     sonnet: null,
     opus: null,
     design: null,
-    extras: { ttl: null, hit: null, cacheCreation: 0, cacheRead: 0, peak: false, overage: '' },
+    extras: { ttl: null, hit: null, peak: false, overage: '' },
     extra_usage: null,
-    cfRejected: false,
   };
-
-  // Org gate: fail-closed when we cannot verify the cache-fix org matches the
-  // active profile. Two rejection cases:
-  //  (1) Profile fetch failed or user is logged out (expectedOrgId empty) —
-  //      we cannot verify, so we cannot trust cache-fix (it may contain stale
-  //      headers from a prior account).
-  //  (2) cfData declares a different org than the active profile — relogin
-  //      stale-file scenario.
-  // A cache-fix record WITHOUT an org_id claim is permitted when the profile
-  // is verified (older cache-fix versions may not populate this field); it
-  // will only render the current profile's usage because OAuth data wins
-  // any disputed fields.
-  let cfUsable = cfData;
-  if (cfUsable) {
-    const cfOrg = (cfUsable._extras && cfUsable._extras.org_id) || '';
-    const cannotVerify = !expectedOrgId;
-    const orgMismatch = cfOrg && expectedOrgId && cfOrg !== expectedOrgId;
-    if (cannotVerify || orgMismatch) {
-      out.cfRejected = true;
-      cfUsable = null;
-    }
-  }
-
-  // nowMs anchors burn-rate to when cache-fix last wrote; realNowMs gates expiry.
-  const nowMs = (cfUsable && cfUsable.ts)
-    ? (new Date(cfUsable.ts).getTime() || Date.now())
-    : Date.now();
-  const realNowMs = Date.now();
 
   const WINDOW_5H = 5 * 3600 * 1000;
   const WINDOW_7D = 7 * 86400 * 1000;
 
-  // session (5h) — cache-fix preferred when reset is future
-  const cf5hResetMs = cfUsable ? Number(cfUsable.q5h_reset) * 1000 : 0;
-  if (cfUsable && cf5hResetMs > realNowMs) {
-    const pct = Math.floor((Number(cfUsable.q5h) || 0) * 100);
-    const resetsAt = new Date(cf5hResetMs).toISOString();
-    let burn = '';
-    if (pct > 0) {
-      const windowStart = cf5hResetMs - WINDOW_5H;
-      const elapsedMin = (nowMs - windowStart) / 60000;
-      if (elapsedMin > 1) burn = `+${(pct / elapsedMin).toFixed(1)}/m`;
-    }
-    // Pacing anchors on nowMs (when utilization was measured), not realNowMs —
-    // prevents "under pace" false-positive when cfData.ts is a few minutes old.
-    out.session = { utilization: pct, resets_at: resetsAt, burn, pacing: computePacing(resetsAt, WINDOW_5H, nowMs) };
-  } else if (oauthData && oauthData.five_hour) {
-    const fh = oauthData.five_hour;
-    // OAuth data is fetched now → nowMs ≈ realNowMs anyway; use nowMs for consistency.
-    out.session = { utilization: fh.utilization, resets_at: fh.resets_at, burn: '', pacing: computePacing(fh.resets_at, WINDOW_5H, nowMs) };
-  }
-
-  // week (7d) — same priority
-  const cf7dResetMs = cfUsable ? Number(cfUsable.q7d_reset) * 1000 : 0;
-  if (cfUsable && cf7dResetMs > realNowMs) {
-    const pct = Math.floor((Number(cfUsable.q7d) || 0) * 100);
-    const resetsAt = new Date(cf7dResetMs).toISOString();
-    let burn = '';
-    if (pct > 0) {
-      const windowStart = cf7dResetMs - WINDOW_7D;
-      const elapsedMin = (nowMs - windowStart) / 60000;
-      if (elapsedMin > 1) burn = `+${(pct / (elapsedMin / 60)).toFixed(1)}/hr`;
-    }
-    out.week = { utilization: pct, resets_at: resetsAt, burn, pacing: computePacing(resetsAt, WINDOW_7D, nowMs) };
-  } else if (oauthData && oauthData.seven_day) {
-    const sd = oauthData.seven_day;
-    out.week = { utilization: sd.utilization, resets_at: sd.resets_at, burn: '', pacing: computePacing(sd.resets_at, WINDOW_7D, nowMs) };
-  }
-
-  // Sub-limits + design — OAuth-only (unified cache-fix headers have no per-model breakdown)
   if (oauthData) {
+    if (oauthData.five_hour) {
+      const fh = oauthData.five_hour;
+      out.session = {
+        utilization: fh.utilization,
+        resets_at: fh.resets_at,
+        burn: computeBurn(fh.utilization, fh.resets_at, WINDOW_5H, nowMs, 'm'),
+        pacing: computePacing(fh.resets_at, WINDOW_5H, nowMs),
+      };
+    }
+    if (oauthData.seven_day) {
+      const sd = oauthData.seven_day;
+      out.week = {
+        utilization: sd.utilization,
+        resets_at: sd.resets_at,
+        burn: computeBurn(sd.utilization, sd.resets_at, WINDOW_7D, nowMs, 'hr'),
+        pacing: computePacing(sd.resets_at, WINDOW_7D, nowMs),
+      };
+    }
     if (oauthData.seven_day_sonnet) {
       const s = oauthData.seven_day_sonnet;
       out.sonnet = { utilization: s.utilization, resets_at: s.resets_at, pacing: computePacing(s.resets_at, WINDOW_7D, nowMs) };
@@ -628,19 +590,13 @@ function mergeRateData(oauthData, cfData, expectedOrgId) {
     }
   }
 
-  // Cache-fix extras — regardless of whether cfData won the 5h/7d battle,
-  // TTL/hit/PEAK/OVERAGE still useful IF org matches (already gated above).
-  if (cfUsable) {
-    const ex = cfUsable._extras || { cache: {}, peak_hour: false };
-    const cache = ex.cache || {};
-    out.extras.ttl = cache.ttl_tier || null;
-    out.extras.hit = (cache.hit_rate != null && cache.hit_rate !== '' && cache.hit_rate !== 'N/A')
-      ? cache.hit_rate
-      : null;
-    out.extras.cacheCreation = Number(cache.cache_creation) || 0;
-    out.extras.cacheRead = Number(cache.cache_read) || 0;
-    out.extras.peak = Boolean(ex.peak_hour);
-    out.extras.overage = cfUsable.qoverage || '';
+  // Cache-fix extras: TTL/hit/PEAK/OVERAGE only — already staleness-gated and
+  // normalized by readCacheFixExtras → gateAndNormalize. No re-normalization here.
+  if (cfExtras) {
+    out.extras.ttl = cfExtras.ttl_tier;
+    out.extras.hit = cfExtras.hit_rate;
+    out.extras.peak = cfExtras.peak_hour;
+    out.extras.overage = cfExtras.overage;
   }
 
   return out;
@@ -650,7 +606,7 @@ function mergeRateData(oauthData, cfData, expectedOrgId) {
 // Flags control graceful degradation.
 function buildExtrasTail(extras, flags) {
   if (!extras) return '';
-  const { includeTTL = true, includeIdleWarning = true, includeHit = true,
+  const { includeTTL = true, includeHit = true,
     includePeak = true, includeOverage = true } = flags;
   let tail = '';
 
@@ -661,15 +617,6 @@ function buildExtrasTail(extras, flags) {
   if (extras.ttl && includeTTL) {
     if (extras.ttl === '5m') {
       tail += ` | \x1b[31mTTL:5m\x1b[0m`;
-      if (includeIdleWarning) {
-        const prefix = extras.cacheCreation + extras.cacheRead;
-        if (prefix > 0) {
-          const warn = prefix >= 1_000_000
-            ? `${(prefix / 1_000_000).toFixed(1)}M`
-            : `${Math.round(prefix / 1000)}K`;
-          tail += ` \x1b[31m\u26A0 idle >5m = ${warn} rebuild\x1b[0m`;
-        }
-      }
     } else {
       tail += ` | ${c.dimWhite}TTL:${c.reset}${extras.ttl}`;
     }
@@ -713,7 +660,6 @@ function formatRateLimitLine(merged, termWidth) {
       includeSubLimits = true,
       includeDesign = true,
       includeTTL = true,
-      includeIdleWarning = true,
       includeHit = true,
       includePeak = true,
       includeOverage = true,
@@ -733,8 +679,11 @@ function formatRateLimitLine(merged, termWidth) {
       segs.push(buildLimitSegment(merged.design, 'design', 'des', { ...segOpts, includeBurn: false, includeReset: false }));
     }
     let line = segs.filter(Boolean).join(' | ');
+    // Never emit orphan extras-tail without at least one OAuth quota segment.
+    // Guards the OAuth-unavailable + fresh-cache-fix case from rendering "| TTL:1h 99.9%" alone.
+    if (!line) return '';
     line += buildExtrasTail(merged.extras, {
-      includeTTL, includeIdleWarning, includeHit, includePeak, includeOverage,
+      includeTTL, includeHit, includePeak, includeOverage,
     });
     return line;
   }
@@ -746,12 +695,12 @@ function formatRateLimitLine(merged, termWidth) {
     { useShort: true },                                                                       // L1 short labels
     { useShort: true, includePeak: false, includeOverage: false },                            // L2 drop markers
     { useShort: true, includePeak: false, includeOverage: false, includeHit: false },         // L3 drop hit%
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false }, // L4 drop TTL
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false }, // L5 drop design
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false }, // L6 drop pacing
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false, includeBurn: false }, // L7 drop burn
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false }, // L8 drop reset
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeIdleWarning: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false, includeSubLimits: false }, // L9 minimum
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false }, // L4 drop TTL
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false }, // L5 drop design
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false }, // L6 drop pacing
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false, includeBurn: false }, // L7 drop burn
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false }, // L8 drop reset
+    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false, includeSubLimits: false }, // L9 minimum
   ];
 
   let line = '';
@@ -762,39 +711,46 @@ function formatRateLimitLine(merged, termWidth) {
   return line; // return narrowest even if still over
 }
 
-// Read extras (cache tier, hit rate, peak_hour, org_id) from quota-status.json.
-// org_id is used downstream to reject cache-fix data written under a different
-// OAuth account (relogin scenario where quota-status.json still reflects the
-// previous account's headers).
-function readQuotaStatusExtras(qsPath) {
-  try {
-    const raw = fs.readFileSync(qsPath, 'utf8');
-    const qs = JSON.parse(raw);
-    const headers = (qs && qs.all_headers && typeof qs.all_headers === 'object') ? qs.all_headers : {};
-    return {
-      cache: (qs && qs.cache && typeof qs.cache === 'object') ? qs.cache : {},
-      peak_hour: Boolean(qs && qs.peak_hour),
-      org_id: headers['anthropic-organization-id'] || '',
-    };
-  } catch {
-    return { cache: {}, peak_hour: false, org_id: '' };
-  }
-}
-
-// Detect claude-code-cache-fix / claude-code-meter output and return latest record.
-// Primary source: ~/.claude/claude-meter.jsonl (last line).
-// Fallback: ~/.claude/quota-status.json (written by cache-fix interceptor).
-// Tests: `_mock_cache_fix` on stdin short-circuits file I/O with a deterministic
-// payload matching the { q5h, q7d, q5h_reset, q7d_reset, qoverage, ts, _extras }
-// shape, enabling coverage of 5m/PEAK/OVERAGE branches without a live file.
-// Returns null when neither source is available — indicator stays hidden.
-function readCacheFixQuota(input) {
+// Detect claude-code-cache-fix output and return extras-only record.
+// Extras: TTL tier, cache hit rate, PEAK flag, OVERAGE status.
+// Staleness gate: if ts is >30 minutes older than nowMs, return null.
+// nowMs must be the same timestamp passed to buildRateView — anchors staleness
+// check to the same wall-clock point as pacing/burn calculations.
+// Edge cases: future ts (clock skew) → fresh; malformed/absent ts → null; file missing → null.
+// Returns: { ttl_tier, hit_rate, peak_hour, overage, ts } | null
+//
+// Tests: _mock_cache_fix on stdin short-circuits file I/O. Shape must be flat extras.
+// null mock value → skip mock path, fall through to filesystem (returns null in test env).
+function readCacheFixExtras(input, nowMs) {
   const mock = getPath(input, '_mock_cache_fix');
-  if (mock) return mock;
+  if (mock !== undefined && mock !== null) {
+    // Delegate to gateAndNormalize so mock and filesystem paths share identical
+    // normalization logic. Function declaration is hoisted; nowMs closes in.
+    return gateAndNormalize(
+      mock.ts || '',
+      mock.ttl_tier,
+      mock.hit_rate,
+      mock.peak_hour,
+      mock.overage,
+    );
+  }
 
   const home = os.homedir();
   const jsonlPath = path.join(home, '.claude', 'claude-meter.jsonl');
   const qsPath = path.join(home, '.claude', 'quota-status.json');
+
+  function gateAndNormalize(ts, ttl_tier, hit_rate, peak_hour, overage) {
+    const ageMs = nowMs - new Date(ts).getTime();
+    if (!isFinite(ageMs) || ageMs > CACHE_FIX_MAX_AGE_MS) return null;
+    // Future ts (ageMs < 0) is treated as fresh — clock skew tolerance
+    return {
+      ttl_tier: ttl_tier || null,
+      hit_rate: (hit_rate != null && hit_rate !== '' && hit_rate !== 'N/A') ? hit_rate : null,
+      peak_hour: Boolean(peak_hour),
+      overage: overage || '',
+      ts,
+    };
+  }
 
   // Primary: tail of claude-meter.jsonl
   try {
@@ -815,7 +771,7 @@ function readCacheFixQuota(input) {
       if (lines.length > 0) {
         try {
           const rec = JSON.parse(lines[lines.length - 1]);
-          return { ...rec, _extras: readQuotaStatusExtras(qsPath) };
+          return gateAndNormalize(rec.ts, rec.ttl_tier, rec.hit_rate, rec.peak_hour, rec.overage);
         } catch {
           // malformed last line — fall through to qs fallback
         }
@@ -825,26 +781,18 @@ function readCacheFixQuota(input) {
     // no jsonl — fall through
   }
 
-  // Fallback: translate quota-status.json into the same shape
+  // Fallback: quota-status.json extras only (no quota fields)
   try {
     const raw = fs.readFileSync(qsPath, 'utf8');
     const qs = JSON.parse(raw);
-    const fh = qs.five_hour || {};
-    const sd = qs.seven_day || {};
-    const headers = (qs.all_headers && typeof qs.all_headers === 'object') ? qs.all_headers : {};
-    return {
-      q5h: Number(fh.utilization) || 0,
-      q7d: Number(sd.utilization) || 0,
-      q5h_reset: Number(fh.resets_at) || 0,
-      q7d_reset: Number(sd.resets_at) || 0,
-      qoverage: qs.overage_status || '',
-      ts: qs.timestamp || '',
-      _extras: {
-        cache: (qs.cache && typeof qs.cache === 'object') ? qs.cache : {},
-        peak_hour: Boolean(qs.peak_hour),
-        org_id: headers['anthropic-organization-id'] || '',
-      },
-    };
+    const cache = (qs.cache && typeof qs.cache === 'object') ? qs.cache : {};
+    return gateAndNormalize(
+      qs.timestamp || '',
+      cache.ttl_tier,
+      cache.hit_rate,
+      qs.peak_hour,
+      qs.overage_status,
+    );
   } catch {
     return null;
   }
@@ -1011,10 +959,8 @@ function main() {
   // Read OAuth token once — reused for profile (Line 1 tail) and usage (Line 4).
   const oauthToken = readOAuthToken();
 
-  // Fetch profile once (used for both the @username tail and the org-gate that
-  // rejects cross-account cache-fix data on Line 4).
+  // Fetch profile once (used for the @username tail on Line 1).
   const profile = fetchUserProfile(oauthToken, input);
-  const expectedOrgId = getPath(profile, 'organization.uuid') || '';
 
   // Optional: OAuth account identifier (rightmost segment, drops first on overflow)
   const userFormat = (process.env.CONTEXTBRICKS_USER || 'username').toLowerCase();
@@ -1144,10 +1090,11 @@ function main() {
   const showLimits = process.env.CONTEXTBRICKS_SHOW_LIMITS !== '0';
   let merged = null;
   if (showLimits) {
+    const nowMs = Date.now();
     const oauthData = fetchUsageData(oauthToken, input);
     const useCacheFix = process.env.CONTEXTBRICKS_SHOW_CACHE_FIX !== '0';
-    const cfData = useCacheFix ? readCacheFixQuota(input) : null;
-    merged = mergeRateData(oauthData, cfData, expectedOrgId);
+    const cfData = useCacheFix ? readCacheFixExtras(input, nowMs) : null;
+    merged = buildRateView(oauthData, cfData, nowMs);
   }
 
   // Extra usage (monthly overage) on Line 3 — billing info next to session cost.

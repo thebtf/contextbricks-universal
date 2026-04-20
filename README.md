@@ -19,9 +19,9 @@ session:27%/25% +0.4/m ~3h43m | week:77%/35% +1.3/hr ~4d12h | sonnet:22%/36% | d
 - **Real-time context tracking** — brick visualization of context window usage
 - **Unified Line 4 quotas** — session (5h) + weekly (7d) + sonnet/opus sub-limits + Claude Design, all on one line
 - **Pacing target** (`/NN%`) — shows expected % for elapsed-time-in-window (green = under pace, red = ahead of pace)
-- **Rate-limit merge** — Anthropic OAuth usage + [`claude-code-cache-fix`](https://www.npmjs.com/package/claude-code-cache-fix) data, cross-account safe (org-id gate)
+- **OAuth-authoritative quotas** — `session`/`week`/`sonnet`/`opus`/`design` always from Anthropic OAuth API. Optional extras (TTL/hit/PEAK/OVERAGE) from [`claude-code-cache-fix`](https://www.npmjs.com/package/claude-code-cache-fix) when fresh (<30 min)
 - **Extra usage on Line 3** — monthly overage billing `extra:$N/$M` next to session cost
-- **Burn rates** — `+0.4/m` (5h) / `+1.3/hr` (7d) from cache-fix data
+- **Burn rates** — `+0.4/m` (5h) / `+1.3/hr` (7d) from OAuth data
 - **TTL tier indicator** — `TTL:1h 99.9%` or red `TTL:5m ⚠ idle >5m = 800K rebuild`
 - **10-step graceful degradation** — short labels (`s/w/son/des`) then drops markers → TTL → design → pacing → burn → reset → sub-limits
 - **Color gradient** — 256-color green-to-red scale based on utilization percentage
@@ -117,10 +117,8 @@ session:27%/25% +0.4/m ~3h43m | week:77%/35% +1.3/hr ~4d12h | sonnet:22%/36% ~4d
 ```
 
 Auto-merges:
-- **Anthropic OAuth `/api/oauth/usage`** — authoritative source for `sonnet`/`opus` sub-limits, `design` (from the internal `seven_day_omelette` field), and `extra_usage`.
-- **`claude-code-cache-fix`** via `~/.claude/claude-meter.jsonl` or `quota-status.json` — fresher per-request source for `session`/`week` utilization, burn rates, TTL tier, cache hit %, PEAK, OVERAGE.
-
-**Cross-account safety**: when cache-fix's `anthropic-organization-id` header differs from the active OAuth profile's org, cache-fix data is dropped (prevents stale values after a relogin into a different account).
+- **Anthropic OAuth `/api/oauth/usage`** — single authoritative source for all quota values: `session` (5h), `week` (7d), `sonnet`/`opus` sub-limits, `design` (`seven_day_omelette`), and `extra_usage`.
+- **`claude-code-cache-fix`** via `~/.claude/claude-meter.jsonl` or `quota-status.json` — optional extras only: TTL tier, cache hit %, PEAK, OVERAGE. Used only when fresh (< 30 min old). Stale or absent → extras hidden, quota values unaffected.
 
 **Pacing target** (`/NN%`): expected % for elapsed-time-in-window. Coloured relative to actual usage:
 - Green → more than 5% under pace (headroom)
@@ -137,7 +135,7 @@ Auto-merges:
 | `session:X%` | 5-hour rolling limit utilization |
 | `week:X%` | 7-day overall limit utilization |
 | `/NN%` (after `%`) | Pacing target (expected % based on elapsed time) |
-| `+0.4/m`, `+1.3/hr` | Burn rate since window start (cache-fix only) |
+| `+0.4/m`, `+1.3/hr` | Burn rate since window start (from OAuth data) |
 | `sonnet:X%` | 7-day Sonnet sub-limit (OAuth only) |
 | `opus:X%` | 7-day Opus sub-limit (OAuth only) |
 | `design:X%` | 7-day Claude Design sub-limit (OAuth, from `seven_day_omelette`) |
@@ -168,7 +166,7 @@ Auto-merges:
 | `CONTEXTBRICKS_SHOW_DIR` | `1` | Show current subdirectory (`0` to hide) |
 | `CONTEXTBRICKS_BRICKS` | `30` | Number of bricks in the visualization |
 | `CONTEXTBRICKS_SHOW_LIMITS` | `1` | Show rate limit line (`0` to hide) |
-| `CONTEXTBRICKS_SHOW_CACHE_FIX` | `1` | Merge `claude-code-cache-fix` data into Line 4 (`0` to ignore, use OAuth only) |
+| `CONTEXTBRICKS_SHOW_CACHE_FIX` | `1` | Show cache-fix extras (TTL / hit rate / PEAK / OVERAGE) in Line 4 (`0` to disable extras; core quota values always from OAuth) |
 | `CONTEXTBRICKS_USER` | `username` | OAuth account display on Line 1: `username` / `email` / `name` / `off` |
 | `CONTEXTBRICKS_LABELS` | (auto) | Force short labels (`s/w/son/opus/des`) by setting to `short`. Default auto-degrades based on terminal width. |
 | `CONTEXTBRICKS_RESET_EXACT` | `1` | Exact reset times `~1d23h` (`0` for approximate `~1d`) |

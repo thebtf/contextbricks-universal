@@ -711,25 +711,26 @@ function formatRateLimitLine(merged, termWidth) {
 
 // Detect claude-code-cache-fix output and return extras-only record.
 // Extras: TTL tier, cache hit rate, PEAK flag, OVERAGE status.
-// Staleness gate: if ts is >30 minutes old, return null.
+// Staleness gate: if ts is >30 minutes older than nowMs, return null.
+// nowMs must be the same timestamp passed to buildRateView — anchors staleness
+// check to the same wall-clock point as pacing/burn calculations.
 // Edge cases: future ts (clock skew) → fresh; malformed/absent ts → null; file missing → null.
 // Returns: { ttl_tier, hit_rate, peak_hour, overage, ts } | null
 //
 // Tests: _mock_cache_fix on stdin short-circuits file I/O. Shape must be flat extras.
 // null mock value → skip mock path, fall through to filesystem (returns null in test env).
-function readCacheFixExtras(input) {
+function readCacheFixExtras(input, nowMs) {
   const mock = getPath(input, '_mock_cache_fix');
   if (mock !== undefined && mock !== null) {
-    const ts = mock.ts || '';
-    const ageMs = Date.now() - new Date(ts).getTime();
-    if (!isFinite(ageMs) || ageMs > CACHE_FIX_MAX_AGE_MS) return null;
-    return {
-      ttl_tier: mock.ttl_tier || null,
-      hit_rate: mock.hit_rate != null ? mock.hit_rate : null,
-      peak_hour: Boolean(mock.peak_hour),
-      overage: mock.overage || '',
-      ts,
-    };
+    // Delegate to gateAndNormalize so mock and filesystem paths share identical
+    // normalization logic. Function declaration is hoisted; nowMs closes in.
+    return gateAndNormalize(
+      mock.ts || '',
+      mock.ttl_tier,
+      mock.hit_rate,
+      mock.peak_hour,
+      mock.overage,
+    );
   }
 
   const home = os.homedir();
@@ -737,7 +738,7 @@ function readCacheFixExtras(input) {
   const qsPath = path.join(home, '.claude', 'quota-status.json');
 
   function gateAndNormalize(ts, ttl_tier, hit_rate, peak_hour, overage) {
-    const ageMs = Date.now() - new Date(ts).getTime();
+    const ageMs = nowMs - new Date(ts).getTime();
     if (!isFinite(ageMs) || ageMs > CACHE_FIX_MAX_AGE_MS) return null;
     // Future ts (ageMs < 0) is treated as fresh — clock skew tolerance
     return {
@@ -1090,7 +1091,7 @@ function main() {
     const nowMs = Date.now();
     const oauthData = fetchUsageData(oauthToken, input);
     const useCacheFix = process.env.CONTEXTBRICKS_SHOW_CACHE_FIX !== '0';
-    const cfData = useCacheFix ? readCacheFixExtras(input) : null;
+    const cfData = useCacheFix ? readCacheFixExtras(input, nowMs) : null;
     merged = buildRateView(oauthData, cfData, nowMs);
   }
 

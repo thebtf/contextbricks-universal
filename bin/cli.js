@@ -248,7 +248,11 @@ function test() {
   const variants = [
     {
       label: 'oauthOnly — no cache-fix extras',
-      data: makeBaseData({ _mock_cache_fix: null }),
+      // Use a stale timestamp instead of null: null causes readCacheFixExtras()
+      // to fall through to real filesystem (non-deterministic on machines with
+      // cache-fix installed). A stale ts hits gateAndNormalize and returns null
+      // deterministically regardless of filesystem state.
+      data: makeBaseData({ _mock_cache_fix: { ts: staleTs } }),
     },
     {
       label: 'freshExtras — TTL/hit/PEAK suffix expected',
@@ -276,7 +280,10 @@ function test() {
     },
     {
       label: 'staleWhileError — live OAuth 429 requires real API; in test env identical to oauthOnly',
-      data: makeBaseData({ _mock_cache_fix: null }),
+      // Intentionally identical to oauthOnly in test env: exercising the real
+      // stale-while-error path requires a live 429 response which is not
+      // reproducible in offline tests. See TECHNICAL_DEBT.md.
+      data: makeBaseData({ _mock_cache_fix: { ts: staleTs } }),
     },
   ];
 

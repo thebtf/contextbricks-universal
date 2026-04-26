@@ -1,41 +1,41 @@
 # ContextBricks Universal — Continuity
 
-## Project State (2026-04-20)
+## Project State (2026-04-26)
 
-**Version:** 4.6.1 — live on npm with SLSA provenance (Trusted Publisher OIDC)
-**Branch:** `main` (HEAD = `c5e1ccf` — squash merge of PR #14)
-**Latest tag:** `v4.6.1` (https://github.com/thebtf/contextbricks-universal/releases/tag/v4.6.1)
-**Prior:** v4.6.0 (published 2026-04-19)
+**Version:** 4.7.0 — live on npm with SLSA provenance (Trusted Publisher OIDC)
+**Branch:** `main` (HEAD = `36a7852` — CHANGELOG for v4.7.0)
+**Latest tag:** `v4.7.0` (https://github.com/thebtf/contextbricks-universal/releases/tag/v4.7.0)
+**Prior:** v4.6.1 (published 2026-04-20)
 **Local wiring:** `~/.claude/settings.json → statusLine.command` points to
 `D:/Dev/contentbricks-universal/scripts/statusline.js` (live dev — not a copy).
-Any edit to main repo → active on next statusline render.
 
-## Done (this session, 2026-04-20)
+## Done (this session, 2026-04-26)
 
-- **Bug fix shipped:** stale `~/.claude/quota-status.json` (39 h) no longer overrides fresh OAuth data.
-  User-visible symptom before: `w:13%`; after: `w:45%` matching Anthropic dashboard.
-- **OAuth-authoritative data model** — 5 ADRs in `.agent/specs/rate-limit-refactor-v4.6.1/architecture.md`:
-  ADR-001 OAuth sole source for session/week/sonnet/opus/design;
-  ADR-002 cache-fix extras-only (TTL/hit/PEAK/OVERAGE);
-  ADR-003 30-min staleness gate;
-  ADR-004 remove org-id cross-account gate;
-  ADR-005 pure functions take `nowMs` parameter.
-- **SpecKit artifacts:** `spec.md`, `plan.md`, `tasks.md`, `architecture.md` in spec folder.
-- **10 commits → squash-merged → v4.6.1:** T1-T6 initial + 3 code-review fix commits + 1 PR-review fix commit.
-  Net -43 LOC in `scripts/statusline.js`.
-- **PR #14:** coderabbit + gemini + greptile reviewed; 7 threads resolved (2 MAJOR fixes applied, 5 pre-addressed by same commit).
-- **Engram memory stored:** id 69644 — replaces v4.6.0 "cache-fix takes priority" with new OAuth-authoritative decision.
-- **Local wiring switched to dev-path** in `~/.claude/settings.json`.
+- **TTL+hit% prefix** — moved from trailing suffix to start of Line 4. Format: `TTL:1h/99.6%`.
+  Previously hit% was rounded (`Math.round`) and shown as separate segment after TTL.
+  Now raw precision from cache-fix, atomic pair (both shown or both hidden).
+- **Terminal width detection** — added `detectTermWidth()` opening `CONOUT$` (Windows) or
+  `/dev/tty` (Unix) directly. Claude Code pipes all fds (stdin/stdout/stderr), so
+  `process.stdout.columns` = 0 → false fallback to 80 columns. Root cause of premature
+  graceful degradation that was hiding hit%.
+- **Degradation reordered** — sonnet drops at L4 (early, per user preference), opus always
+  shown when present. TTL survives until L8 (second-to-last). Order:
+  L0 full → L1 short labels → L2 drop PEAK/OVERAGE → L3 drop design → L4 drop sonnet →
+  L5 drop pacing → L6 drop burn → L7 drop reset → L8 drop TTL → minimum (s:X% | w:Y%).
+- **hit_rate 0% fix** — truthy check replaced with `!= null` (CodeRabbit + Gemini review catch).
+- **PR #15:** CodeRabbit + Gemini + Codex reviewed, 3 threads resolved, all about same issue (0% edge case).
+- **v4.7.0 released:** tag + npm + SLSA provenance. CI green in 12s.
 
 ## Now
 
-Nothing in flight. Session at natural checkpoint — v4.6.1 shipped end-to-end (tag + release + npm + SLSA).
+Nothing in flight. Session at natural checkpoint — v4.7.0 shipped end-to-end.
 
 ## Next (when resuming)
 
-- On next statusline render: verify `w:45%` (or current real value) displayed, confirming dev-path wiring is live.
-- Monitor first `claude-code-cache-fix` writes — if extras render TTL/hit again, the full fix is validated in the wild.
-- Pick up from `inbox` if new user reports arrive (statusline bugs, additional refactor candidates).
+- Verify live statusline shows `TTL:1h/XX.X%` prefix on next render.
+- Verify `detectTermWidth()` returns correct width (full labels when terminal is wide).
+- Monitor: does the new degradation order feel right for the user's terminal width?
+- Pick up from `inbox` if new user reports arrive.
 
 ## Blockers
 
@@ -43,22 +43,21 @@ None.
 
 ## Deferred / Open (carried forward)
 
-- **`TECHNICAL_DEBT.md`:** suppress `design:0%` segment when `utilization === 0` (carry-forward, not a regression; pre-existed in v4.5.0).
-- **Worktree `D:/Dev/contentbricks-wt/v4.6.1-oauth-authoritative`** — removal failed (file lock). Clean via `git worktree prune` after the locking process closes.
-- **Test fixture for real-world staleWhileError scenario** — current `staleWhileError` variant is deterministic-equal to `oauthOnly` in test env (documented honestly in label). Real 429 path requires live-API harness not currently available.
-- **MAX_STALE_MS constants (OAuth path)** — distinct from `CACHE_FIX_MAX_AGE_MS` (extracted this release). Two OAuth constants (`7d` profile cache, `5h` stale-while-error usage cache) remain inline; low priority.
+- **`TECHNICAL_DEBT.md`:** suppress `design:0%` segment when `utilization === 0` (carry-forward, not a regression).
+- **Test fixture for real-world staleWhileError scenario** — requires live-API harness.
+- **MAX_STALE_MS constants (OAuth path)** — two inline constants (`7d` profile, `5h` stale-while-error) remain; low priority.
+- **Line 3 overflow protection** — no `termWidth` check on Line 3 (bricks + stats). Low real-world frequency.
+- **GitHub Actions Node.js 20 deprecation** — actions/checkout@v4 and actions/setup-node@v4 still on Node 20; need update by June 2026.
 
 ## Resumability Test
 
-A future agent running `/nvmd-platform:session --load` on this file should in the first 5 actions:
+A future agent running `/session --load` on this file should in the first 5 actions:
 
-1. Read this CONTINUITY → see v4.6.1 shipped, no in-flight work.
-2. Run `npm view contextbricks-universal version` → confirm `4.6.1` (or newer).
-3. Run `git -C "D:/Dev/contentbricks-universal" log --oneline -3` → see `c5e1ccf v4.6.1 — Rate-Limit Refactor (OAuth-authoritative) (#14)` at HEAD.
-4. Check `~/.claude/settings.json → statusLine.command` → confirm it points to `D:/Dev/contentbricks-universal/scripts/statusline.js` (live dev-path, not `~/.claude/statusline.js`).
-5. Read `.agent/specs/rate-limit-refactor-v4.6.1/architecture.md` ADR section → understand the new OAuth-authoritative data model before any further edits to the rate-limit subsystem.
-
-All context needed to resume is encoded in this file + git + GitHub + npm + engram (id 69644). No tribal knowledge required.
+1. Read this CONTINUITY → see v4.7.0 shipped, no in-flight work.
+2. Run `npm view contextbricks-universal version` → confirm `4.7.0` (or newer).
+3. Run `git log --oneline -3` → see `36a7852 docs: add CHANGELOG entry for v4.7.0` at HEAD.
+4. Check `~/.claude/settings.json → statusLine.command` → confirm live dev-path.
+5. Observe statusline Line 4 → should show `TTL:1h/XX.X%` prefix when cache-fix is fresh.
 
 ## What This Project Does
 
@@ -66,36 +65,33 @@ Cross-platform Node.js statusline for Claude Code CLI. Displays 4 lines:
 1. Model + git repo:branch + dirty/ahead/behind + diff stats + @oauth_user
 2. Last commit hash + message
 3. Context bricks + % + free tokens + session time + cost + extra:$N/$M
-4. **Unified rate-limit line** (as of v4.6.1): OAuth authoritative for session/week/sonnet/opus/design + optional extras (TTL/hit/PEAK/OVERAGE) from cache-fix when fresh (<30 min)
+4. **TTL:1h/99.6% prefix** | session/week with pacing + burn + reset | sonnet (degradable) | opus (always) | design | PEAK/OVERAGE
 
 ## Architecture
 
-- `scripts/statusline.js` — Main statusline (~900 lines post-refactor). Reads JSON from stdin, writes ANSI to stdout.
+- `scripts/statusline.js` — Main statusline (~930 lines). Reads JSON from stdin, writes ANSI to stdout.
 - `bin/cli.js` — CLI install/uninstall/test/help. Writes `~/.claude/statusline.js` as copy and updates settings.json command.
 - `package.json` — npm package `contextbricks-universal`, bins: `contextbricks`, `contextbricks-universal`. postinstall auto-runs install.
 - `.github/workflows/publish.yml` — OIDC Trusted Publisher workflow on tag push.
 
-## Key Technical Decisions (v4.6.1 — current)
+## Key Technical Decisions (v4.7.0 — current)
 
-See `.agent/specs/rate-limit-refactor-v4.6.1/architecture.md` for the full ADR list + mermaid diagram. Summary:
-
-- **OAuth API** (`/api/oauth/usage` + `/api/oauth/profile`) is the single authoritative source for all quota values.
-  Required header: `anthropic-beta: oauth-2025-04-20`. Cache TTL 180 s + stale-while-error up to 5 h.
-- **`claude-code-cache-fix` files** (`~/.claude/quota-status.json`, `claude-meter.jsonl`) — read only for extras
-  (TTL tier, cache hit rate, PEAK, OVERAGE). Rejected if `ts` older than 30 min or malformed.
-- **Pure functions take `nowMs`** — `buildRateView`, `computePacing`, `computeBurn`, `gateAndNormalize`.
-  `main()` captures `Date.now()` once and threads it through.
-- **Burn rates** computed from OAuth data: `+0.X/m` for 5h, `+0.X/hr` for 7d. Suppressed when `pct ≤ 0` or `elapsedMin ≤ 1`.
-- **10-step graceful degradation** preserved from v4.5.0 — short labels → drop markers → drop TTL → drop design → drop pacing → drop burn → drop reset → drop sub-limits. Minimum: `s:X% | w:Y%`.
-- **Env toggles:** `CONTEXTBRICKS_SHOW_LIMITS=0` hides Line 4; `CONTEXTBRICKS_SHOW_CACHE_FIX=0` disables extras
-  (semantics: NOT "OAuth-only" — quotas always from OAuth; this only gates TTL/hit/PEAK/OVERAGE).
+- **TTL+hit% as prefix** — leads Line 4, not trailing. Survives degradation until L8 (near-last).
+  Atomic pair: both shown or both hidden. Raw precision from cache-fix (no rounding).
+- **`detectTermWidth()`** — opens `CONOUT$` (Win) or `/dev/tty` (Unix) when all fds piped.
+  Fallback chain: `CONTEXTBRICKS_WIDTH` → stdout.columns → stderr.columns → detectTermWidth() → `COLUMNS` → 80.
+- **Sonnet-only degradation** — `includeSonnet` flag drops sonnet at L4. Opus has no dedicated
+  flag — always included (rare, important when present). `includeSubLimits` removed.
+- **OAuth API** remains the single authoritative source for all quota values (unchanged from v4.6.1).
+- **Cache-fix extras** (TTL/hit/PEAK/OVERAGE) from `~/.claude/quota-status.json` — unchanged.
+- **Degradation priority** (user-specified): TTL > session/week pacing > burn > reset > sonnet.
 
 ## npm Publishing
 
 - OIDC Trusted Publisher via `publish.yml` on tag push (no `NPM_TOKEN`).
 - Environment: `npm-publish` on GitHub.
-- Node 24 required on CI (bundled npm 11.x supports OIDC; Node 22's npm 10.x does not).
-- Every release: `npm publish --access public` with SLSA provenance attestation (`https://slsa.dev/provenance/v1`).
+- Node 24 required on CI (bundled npm 11.x supports OIDC).
+- SLSA provenance attestation on every release.
 
 ## Upstream Issues
 
@@ -104,13 +100,14 @@ See `.agent/specs/rate-limit-refactor-v4.6.1/architecture.md` for the full ADR l
 ## Lessons Learned (cumulative)
 
 - `anthropic-beta: oauth-2025-04-20` is required for OAuth usage API (undocumented).
-- `spawnSync` with OAuth 429 returns exit 0 + empty stdout (not an exception) — stale-fallback must live outside catch.
-- Node 22's bundled npm 10.x silently falls back to token auth under Trusted Publisher config — always pin Node 24 for OIDC.
-- On Windows `npm install -g <path>` makes a **copy**, not a symlink. Use a direct path in `settings.json` for live dev.
-- `includeIdleWarning` branch in `buildExtrasTail` became unreachable in v4.6.0 when `readCacheFixQuota` return-shape dropped `cache_creation`/`cache_read` — silent dead code surfaced by next-round code review.
-- `_mock_cache_fix: null` causes `readCacheFixExtras` to fall through to real filesystem → non-deterministic tests. Use `{ ts: staleTs }` sentinel instead.
+- `spawnSync` with OAuth 429 returns exit 0 + empty stdout (not an exception).
+- Node 22's bundled npm 10.x silently falls back to token auth under Trusted Publisher config.
+- On Windows `npm install -g <path>` makes a **copy**, not a symlink. Use direct path in settings.json.
+- `process.stdout.columns` = 0 when stdout is piped. `process.stderr.columns` also 0 when Claude Code pipes stderr. Must use `CONOUT$`/`/dev/tty` to get real terminal width.
+- `extras.hit` truthy check hides valid `0` — use `!= null` for nullable values from cache-fix.
+- Graceful degradation order is a UX decision, not a technical one — user preference drives priority.
 
-## Engram Keys (this release)
+## Engram Keys
 
-- **id 69644** — v4.6.1 OAuth-authoritative decision (replaces prior v4.6.0 "cache-fix priority" stance).
-- Earlier global memories (v4.6.0 cycle) remain — now historical context, NOT active guidance for this project.
+- **id 69644** — v4.6.1 OAuth-authoritative decision.
+- **v4.7.0 session** — TTL prefix, detectTermWidth, sonnet-only degradation decisions.

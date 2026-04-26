@@ -635,10 +635,10 @@ function buildExtrasTail(extras, flags) {
 //  L1 short labels: TTL:1h/99% | s:31%/42% +0.4/m ~3h43m | w:… | son:22% | des:0%
 //  L2 drop PEAK/OVERAGE
 //  L3 drop design
-//  L4 drop pacing /NN%
+//  L4 drop sonnet (opus always shown when present)
 //  L5 drop burn rates
 //  L6 drop reset times
-//  L7 drop sub-limits (sonnet/opus)
+//  L7 drop pacing /NN%
 //  L8 drop TTL — minimum: s:31% | w:78%
 function formatRateLimitLine(merged, termWidth) {
   if (!merged) return '';
@@ -652,7 +652,7 @@ function formatRateLimitLine(merged, termWidth) {
       includePacing = true,
       includeBurn = true,
       includeReset = true,
-      includeSubLimits = true,
+      includeSonnet = true,
       includeDesign = true,
       includeTTL = true,
       includePeak = true,
@@ -665,10 +665,10 @@ function formatRateLimitLine(merged, termWidth) {
       buildLimitSegment(merged.session, 'session', 's', segOpts),
       buildLimitSegment(merged.week, 'week', 'w', segOpts),
     ];
-    if (includeSubLimits) {
+    if (includeSonnet) {
       segs.push(buildLimitSegment(merged.sonnet, 'sonnet', 'son', { ...segOpts, includeBurn: false, includeReset: true }));
-      segs.push(buildLimitSegment(merged.opus, 'opus', 'opus', { ...segOpts, includeBurn: false, includeReset: true }));
     }
+    segs.push(buildLimitSegment(merged.opus, 'opus', 'opus', { ...segOpts, includeBurn: false, includeReset: true }));
     if (includeDesign) {
       segs.push(buildLimitSegment(merged.design, 'design', 'des', { ...segOpts, includeBurn: false, includeReset: false }));
     }
@@ -680,18 +680,18 @@ function formatRateLimitLine(merged, termWidth) {
     return (ttl ? ttl + ' | ' : '') + quotas + tail;
   }
 
-  // Degradation chain — TTL survives until L8 (second-to-last).
+  // Degradation chain — sub-limits drop early, TTL survives until L8.
   const baseShort = forceShort;
   const fallbacks = [
     { useShort: baseShort },                                                                                                                                      // L0 full
     { useShort: true },                                                                                                                                            // L1 short labels
     { useShort: true, includePeak: false, includeOverage: false },                                                                                                // L2 drop markers
     { useShort: true, includePeak: false, includeOverage: false, includeDesign: false },                                                                          // L3 drop design
-    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includePacing: false },                                                    // L4 drop pacing
-    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includePacing: false, includeBurn: false },                                // L5 drop burn
-    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false },            // L6 drop reset
-    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false, includeSubLimits: false }, // L7 drop sub-limits
-    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false, includeSubLimits: false, includeTTL: false }, // L8 minimum
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includeSonnet: false },                                                  // L4 drop sonnet
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includeSonnet: false, includePacing: false },                              // L5 drop pacing
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includeSonnet: false, includePacing: false, includeBurn: false },           // L6 drop burn
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includeSonnet: false, includePacing: false, includeBurn: false, includeReset: false }, // L7 drop reset
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includeSonnet: false, includePacing: false, includeBurn: false, includeReset: false, includeTTL: false }, // L8 minimum
   ];
 
   let line = '';
@@ -798,6 +798,26 @@ function visibleLen(s) {
   return stripAnsi(s).length;
 }
 
+// Detect terminal width when all fds are piped (Claude Code pipes stdin/stdout/stderr).
+// Opens the controlling terminal device directly: CONOUT$ on Windows, /dev/tty on Unix.
+function detectTermWidth() {
+  const tty = require('tty');
+  try {
+    const dev = process.platform === 'win32' ? '\\\\.\\CONOUT$' : '/dev/tty';
+    const fd = fs.openSync(dev, fs.constants.O_RDWR);
+    try {
+      const stream = new tty.WriteStream(fd);
+      const cols = stream.columns || 0;
+      stream.destroy();
+      return cols;
+    } finally {
+      try { fs.closeSync(fd); } catch {}
+    }
+  } catch {
+    return 0;
+  }
+}
+
 function main() {
   // Read JSON from stdin
   const raw = readStdin();
@@ -837,6 +857,7 @@ function main() {
   const termWidth = Number(process.env.CONTEXTBRICKS_WIDTH)
     || (process.stdout.columns > 0 ? process.stdout.columns : 0)
     || (process.stderr.columns > 0 ? process.stderr.columns : 0)
+    || detectTermWidth()
     || Number(process.env.COLUMNS)
     || 80;
 

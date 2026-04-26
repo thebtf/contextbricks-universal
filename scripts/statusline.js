@@ -605,7 +605,7 @@ function buildRateView(oauthData, cfExtras, nowMs) {
 // TTL and hit% are an atomic pair — both shown or both hidden.
 function buildTTLPrefix(extras) {
   if (!extras || !extras.ttl) return '';
-  const hitSuffix = extras.hit ? `${c.dim}/${extras.hit}%${c.reset}` : '';
+  const hitSuffix = (extras.hit != null) ? `${c.dim}/${extras.hit}%${c.reset}` : '';
   if (extras.ttl === '5m') {
     return `\x1b[31mTTL:5m${hitSuffix}\x1b[0m`;
   }

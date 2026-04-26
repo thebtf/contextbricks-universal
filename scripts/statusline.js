@@ -6,11 +6,10 @@
 // Line 2: [commit] commit message
 // Line 3: Context bricks | percentage | free | duration | cost | extra:$N/$M
 // Line 4: Unified rate-limit line — OAuth API is the single authoritative source
-//         for all quota values (session/week/sonnet/opus/design). Optional extras
-//         (TTL tier, cache hit rate, PEAK, OVERAGE) from claude-code-cache-fix
-//         when fresh (< 30 min). Stale or missing cache-fix: Line 4 shows OAuth
-//         quota values without extras suffix. Labels: session/week/sonnet/opus/design
-//         with pacing target (`/NN%`) showing expected usage for elapsed time in window.
+//         for all quota values (session/week/sonnet/opus/design). TTL+hit% prefix
+//         leads the line when cache-fix data is fresh (< 30 min). PEAK/OVERAGE
+//         trail at the end. Labels: session/week/sonnet/opus/design with pacing
+//         target (`/NN%`). TTL survives degradation until near-last level.
 //         Cache-fix detected via ~/.claude/claude-meter.jsonl or quota-status.json.
 //
 // Configuration via environment variables:
@@ -602,49 +601,45 @@ function buildRateView(oauthData, cfExtras, nowMs) {
   return out;
 }
 
-// Build the cache-fix extras tail ("| TTL:1h 98% | PEAK | OVERAGE").
-// Flags control graceful degradation.
+// Build TTL+hit% prefix segment for Line 4 ("TTL:1h/99%").
+// TTL and hit% are an atomic pair — both shown or both hidden.
+function buildTTLPrefix(extras) {
+  if (!extras || !extras.ttl) return '';
+  const hitSuffix = extras.hit ? `${c.dim}/${extras.hit}%${c.reset}` : '';
+  if (extras.ttl === '5m') {
+    return `\x1b[31mTTL:5m${hitSuffix}\x1b[0m`;
+  }
+  return `${c.dimWhite}TTL:${c.reset}${extras.ttl}${hitSuffix}`;
+}
+
+// Build the cache-fix extras tail ("| PEAK | OVERAGE").
+// TTL is rendered as a prefix by buildTTLPrefix, not here.
 function buildExtrasTail(extras, flags) {
   if (!extras) return '';
-  const { includeTTL = true, includeHit = true,
-    includePeak = true, includeOverage = true } = flags;
+  const { includePeak = true, includeOverage = true } = flags;
   let tail = '';
-
   if (extras.overage === 'active' && includeOverage) {
     tail += ' | OVERAGE';
   }
-
-  if (extras.ttl && includeTTL) {
-    if (extras.ttl === '5m') {
-      tail += ` | \x1b[31mTTL:5m\x1b[0m`;
-    } else {
-      tail += ` | ${c.dimWhite}TTL:${c.reset}${extras.ttl}`;
-    }
-    if (extras.hit && includeHit) tail += ` ${c.dim}${extras.hit}%${c.reset}`;
-  }
-
   if (extras.peak && includePeak) {
     tail += ` | \x1b[33mPEAK\x1b[0m`;
   }
-
   return tail;
 }
 
-// Assemble the unified rate-limit Line 4 with 10-step graceful degradation.
-// Semantic labels: session/week/sonnet/opus/design. Short-labels mode swaps
-// to s/w/son/opus/des for denser terminals.
+// Assemble the unified rate-limit Line 4 with 9-step graceful degradation.
+// TTL+hit% prefix leads the line; quota segments follow; PEAK/OVERAGE trail.
 //
 // Chain (widest → narrowest):
-//  L0 full: session:31%/42% +0.4/m ~3h43m | week:… | sonnet:22% | design:0% | TTL:1h 99% | PEAK
-//  L1 short labels (s/w/son/des): same info, ~16 chars saved
-//  L2 drop PEAK/OVERAGE markers
-//  L3 drop TTL hit %
-//  L4 drop TTL entirely
-//  L5 drop design
-//  L6 drop pacing /NN%
-//  L7 drop burn rates
-//  L8 drop reset times
-//  L9 drop sub-limits (sonnet/opus) — minimum: s:31% | w:78%
+//  L0 full: TTL:1h/99% | session:31%/42% +0.4/m ~3h43m | week:… | sonnet:22% | design:0% | PEAK
+//  L1 short labels: TTL:1h/99% | s:31%/42% +0.4/m ~3h43m | w:… | son:22% | des:0%
+//  L2 drop PEAK/OVERAGE
+//  L3 drop design
+//  L4 drop pacing /NN%
+//  L5 drop burn rates
+//  L6 drop reset times
+//  L7 drop sub-limits (sonnet/opus)
+//  L8 drop TTL — minimum: s:31% | w:78%
 function formatRateLimitLine(merged, termWidth) {
   if (!merged) return '';
   const exact = process.env.CONTEXTBRICKS_RESET_EXACT !== '0';
@@ -660,7 +655,6 @@ function formatRateLimitLine(merged, termWidth) {
       includeSubLimits = true,
       includeDesign = true,
       includeTTL = true,
-      includeHit = true,
       includePeak = true,
       includeOverage = true,
     } = opts;
@@ -678,29 +672,26 @@ function formatRateLimitLine(merged, termWidth) {
     if (includeDesign) {
       segs.push(buildLimitSegment(merged.design, 'design', 'des', { ...segOpts, includeBurn: false, includeReset: false }));
     }
-    let line = segs.filter(Boolean).join(' | ');
-    // Never emit orphan extras-tail without at least one OAuth quota segment.
-    // Guards the OAuth-unavailable + fresh-cache-fix case from rendering "| TTL:1h 99.9%" alone.
-    if (!line) return '';
-    line += buildExtrasTail(merged.extras, {
-      includeTTL, includeHit, includePeak, includeOverage,
-    });
-    return line;
+    let quotas = segs.filter(Boolean).join(' | ');
+    if (!quotas) return '';
+
+    const ttl = includeTTL ? buildTTLPrefix(merged.extras) : '';
+    const tail = buildExtrasTail(merged.extras, { includePeak, includeOverage });
+    return (ttl ? ttl + ' | ' : '') + quotas + tail;
   }
 
-  // Degradation chain. Always honors forceShort by starting at short-labels level.
+  // Degradation chain — TTL survives until L8 (second-to-last).
   const baseShort = forceShort;
   const fallbacks = [
-    { useShort: baseShort },                                                                 // L0/L1 full (short if forced)
-    { useShort: true },                                                                       // L1 short labels
-    { useShort: true, includePeak: false, includeOverage: false },                            // L2 drop markers
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false },         // L3 drop hit%
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false }, // L4 drop TTL
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false }, // L5 drop design
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false }, // L6 drop pacing
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false, includeBurn: false }, // L7 drop burn
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false }, // L8 drop reset
-    { useShort: true, includePeak: false, includeOverage: false, includeHit: false, includeTTL: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false, includeSubLimits: false }, // L9 minimum
+    { useShort: baseShort },                                                                                                                                      // L0 full
+    { useShort: true },                                                                                                                                            // L1 short labels
+    { useShort: true, includePeak: false, includeOverage: false },                                                                                                // L2 drop markers
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false },                                                                          // L3 drop design
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includePacing: false },                                                    // L4 drop pacing
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includePacing: false, includeBurn: false },                                // L5 drop burn
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false },            // L6 drop reset
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false, includeSubLimits: false }, // L7 drop sub-limits
+    { useShort: true, includePeak: false, includeOverage: false, includeDesign: false, includePacing: false, includeBurn: false, includeReset: false, includeSubLimits: false, includeTTL: false }, // L8 minimum
   ];
 
   let line = '';
@@ -708,7 +699,7 @@ function formatRateLimitLine(merged, termWidth) {
     line = build(opts);
     if (visibleLen(line) <= maxWidth) return line;
   }
-  return line; // return narrowest even if still over
+  return line;
 }
 
 // Detect claude-code-cache-fix output and return extras-only record.
@@ -845,6 +836,7 @@ function main() {
   // Terminal width for dynamic content sizing (stdout is piped, so columns may be 0/undefined)
   const termWidth = Number(process.env.CONTEXTBRICKS_WIDTH)
     || (process.stdout.columns > 0 ? process.stdout.columns : 0)
+    || (process.stderr.columns > 0 ? process.stderr.columns : 0)
     || Number(process.env.COLUMNS)
     || 80;
 

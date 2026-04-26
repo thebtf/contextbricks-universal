@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.7.0] — 2026-04-26
+
+### Changed
+- **TTL+hit% moved to start of Line 4** — `TTL:1h/99.6%` prefix leads the line (was trailing suffix). TTL and hit% are an atomic pair: both shown or both hidden.
+- **Raw hit% precision** — displays value from cache-fix as-is (e.g., `99.6%`). Previously `Math.round()` turned 99.6 → 100%.
+- **Degradation reordered** — sonnet drops at L4 (early), opus always shown when present. TTL survives until L8 (second-to-last). New order: PEAK → design → sonnet → pacing → burn → reset → TTL → minimum.
+
+### Fixed
+- **Terminal width detection** — added `detectTermWidth()` that opens `CONOUT$` (Windows) or `/dev/tty` (Unix) directly. Claude Code pipes all fds, causing `process.stdout.columns` to be 0 and false fallback to 80 columns. Line 4 was degrading prematurely on wide terminals.
+- **hit_rate 0% no longer hidden** — `extras.hit` truthy check replaced with null check. A valid 0% hit rate is now displayed correctly.
+
+### No breaking changes
+All existing environment variables continue to work.
+
 ## [4.6.1] — 2026-04-20
 
 ### Fixed

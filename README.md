@@ -75,6 +75,15 @@ npm update -g contextbricks-universal
 contextbricks install
 ```
 
+## Topology auto-detection (v5.0+)
+
+Statusline reads quota data from response headers of `$ANTHROPIC_BASE_URL/v1/messages` —
+the same endpoint Claude Code itself uses. Works with native OAuth, CLIProxyAPI,
+claude-code-cache-fix, or any combination.
+
+**For proxy users:** if Line 4 shows `[no compatible probe model in upstream]`,
+set `CONTEXTBRICKS_QUOTA_PROBE_MODEL` to a model your proxy dispatcher recognizes.
+
 ## Display Layout
 
 ### Line 1 — Model + Git + Changes + OAuth Account

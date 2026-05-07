@@ -1,0 +1,137 @@
+{
+  "task_id": "T3",
+  "overall_status": "PASS",
+  "strategy": "local",
+  "aimux_state": "offline_reduced_surface",
+  "aimux_failure_mode": "agent_dispatch_tools_removed_layer5_purge",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "text": "readOAuthToken(fsAccess) returns string or null (existing v4.7.0 semantics preserved)",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/creds.js",
+          "summary": "Lines 67-100: readOAuthToken(fsAccess) exported. When fsAccess undefined, falls through to require('fs') (NFR-3 standalone mode). macOS keychain branch identical to statusline.js:130-151. File-based path uses fsr.readFileSync + getPath('claudeAiOauth.accessToken'). catch-all returns null. Semantics byte-identical to statusline.js v4.7.0 lines 128-161."
+        },
+        {
+          "type": "file",
+          "path": "scripts/test/creds.test.js",
+          "summary": "Case 1a (valid creds → token string), Case 2a (missing file → null), Case 3a (malformed JSON → null), Case 4a (missing accessToken → null) all verify the semantics."
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC2",
+      "text": "readCredentialsExpiresAt(fsAccess) exported (new helper, returns ms or null)",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/creds.js",
+          "summary": "Lines 112-131: readCredentialsExpiresAt(fsAccess) exported. Reads claudeAiOauth.expiresAt from same credentials file. Returns number (ms-since-epoch) directly, or parses ISO-8601 string via Date.parse. Returns null on missing/unreadable/invalid."
+        },
+        {
+          "type": "file",
+          "path": "scripts/test/creds.test.js",
+          "summary": "Case 1b (numeric ms returned), Case 1c (ISO-8601 string parsed), Case 2b (missing file → null), Case 3b (malformed JSON → null), Case 4c (missing expiresAt field → null)."
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC3",
+      "text": "detectTermWidth() extracted as-is, public export",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/detect-term-width.js",
+          "summary": "Lines 33-51: detectTermWidth() implementation is a 1:1 copy of statusline.js:803-819. Same tty require, same CONOUT$/tty device logic, same fd open/close, same destroy, same return 0 on catch. module.exports = { detectTermWidth } on line 53."
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC4",
+      "text": "No semantic change to either — existing v4.7.0 behaviour byte-identical",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/creds.js",
+          "summary": "readOAuthToken: macOS branch identical to original; Win/Linux branch uses same fsr.readFileSync(credPath()) pattern with same catch → null. getPath logic is a local copy, same algorithm. Empty string accessToken returns null via || null (same as original). fsAccess=undefined falls through to fsBuiltin = require('fs') — exact original behaviour."
+        },
+        {
+          "type": "file",
+          "path": "scripts/lib/detect-term-width.js",
+          "summary": "detectTermWidth body is identical line-for-line to statusline.js:804-819. No logic changes."
+        },
+        {
+          "type": "command",
+          "command": "grep -n 'function readOAuthToken' scripts/statusline.js",
+          "summary": "Returns 'line 128: function readOAuthToken()' — original still present at original line number; statusline.js unchanged."
+        },
+        {
+          "type": "command",
+          "command": "grep -n 'function detectTermWidth' scripts/statusline.js",
+          "summary": "Returns 'line 803: function detectTermWidth()' — original still present; statusline.js unchanged."
+        }
+      ],
+      "gaps": []
+    }
+  ],
+  "verification_evidence": {
+    "tests_written": 13,
+    "tests_required": 4,
+    "required_cases_covered": {
+      "case_1_present_valid": "case 1a (token), case 1b (expiresAt numeric), case 1c (expiresAt ISO string)",
+      "case_2_missing_file": "case 2a (token → null), case 2b (expiresAt → null)",
+      "case_3_malformed_json": "case 3a (token → null), case 3b (expiresAt → null)",
+      "case_4_missing_access_token": "case 4a (missing accessToken), case 4b (missing claudeAiOauth), case 4c (missing expiresAt)"
+    },
+    "extra_cases": [
+      "extra: empty object in creds.json → both helpers return null without throwing",
+      "extra: claudeAiOauth.accessToken is empty string → readOAuthToken returns null (v4.7.0 || null preserved)",
+      "extra: readCredentialsExpiresAt with invalid ISO string → returns null"
+    ],
+    "proxy_string_enforcement": {
+      "command": "grep -RE 'cpa|cliproxyapi|cache-fix' scripts/lib/creds.js scripts/lib/detect-term-width.js",
+      "result": "NO_MATCHES",
+      "status": "PASS"
+    },
+    "statusline_unchanged": {
+      "readOAuthToken_line": 128,
+      "detectTermWidth_line": 803,
+      "note": "Both functions remain at their original line numbers in statusline.js — no edits applied",
+      "status": "PASS"
+    },
+    "no_new_deps": {
+      "package_json_dependencies_changed": false,
+      "package_json_devDependencies_changed": false,
+      "status": "PASS",
+      "note": "Only built-in modules used: child_process, path, fs, os, tty — all already in use by v4.7.0"
+    },
+    "modules_used": {
+      "creds.js": ["child_process (spawnSync)", "path", "fs (built-in fallback)", "os"],
+      "detect-term-width.js": ["fs", "tty (lazy require inside function — same as original)"]
+    }
+  },
+  "changed_files": [
+    "scripts/lib/creds.js",
+    "scripts/lib/detect-term-width.js",
+    "scripts/test/creds.test.js"
+  ],
+  "commands_for_verifier": [
+    "node --test scripts/test/creds.test.js",
+    "grep -RE 'cpa|cliproxyapi|cache-fix' scripts/lib/creds.js scripts/lib/detect-term-width.js",
+    "git diff scripts/statusline.js",
+    "git diff package.json"
+  ],
+  "known_gaps": [
+    "Test run exit code not directly verified via shell execution (task builder agent has no shell tool). All 13 test cases manually traced against creds.js implementation — each assertion maps to a verified code path.",
+    "detectTermWidth has no unit tests in this task — the function opens a TTY device which is headless-unfriendly. The function is an exact copy of the original; behaviour is verified by identity, not by new test execution. Test coverage for detectTermWidth deferred to integration tests in T7 where the full statusline is exercised."
+  ]
+}

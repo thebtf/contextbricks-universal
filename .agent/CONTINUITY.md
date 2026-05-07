@@ -1,11 +1,11 @@
 # ContextBricks Universal — Continuity
 
-## Project State (2026-04-26)
+## Project State (2026-05-07)
 
-**Version:** 4.7.0 — live on npm with SLSA provenance (Trusted Publisher OIDC)
-**Branch:** `main` (HEAD = `36a7852` — CHANGELOG for v4.7.0)
-**Latest tag:** `v4.7.0` (https://github.com/thebtf/contextbricks-universal/releases/tag/v4.7.0)
-**Prior:** v4.6.1 (published 2026-04-20)
+**Version:** 5.0.0 — live on npm with SLSA provenance (Trusted Publisher OIDC)
+**Branch:** `main` (HEAD = `8998009` — closeout commit for CR-001-initial-scope)
+**Latest tag:** `v5.0.0` (https://github.com/thebtf/contextbricks-universal/releases/tag/v5.0.0)
+**Prior:** v4.7.0 (published 2026-04-26)
 **Local wiring:** `~/.claude/settings.json → statusLine.command` points to
 `D:/Dev/contentbricks-universal/scripts/statusline.js` (live dev — not a copy).
 
@@ -28,24 +28,27 @@
 
 ## Now
 
-**F-001 / CR-001-initial-scope (topology-aware-quota) — IMPLEMENT in flight.**
+Nothing in flight. Session at natural checkpoint — **v5.0.0 shipped end-to-end**.
 
-**Phase 1 GATE-1 PASS** (commits `30df69d` T1, `5c26c73` T2, `0377605` T3 on `main`):
-- `scripts/lib/topology.js` (12/12 tests) — detectTopology native-first
-- `scripts/lib/quota-parser.js` (13/13 tests) — pass-through-unknown buckets
-- `scripts/lib/creds.js` + `scripts/lib/detect-term-width.js` (13/13 tests) — extracted 1:1
-- Combined: 38/38 tests, statusline.js v4.7.0 baseline still renders, 0 string-literals, 0 deps changes
+## Done (this session, 2026-05-07)
 
-**Phase 2 + GATE-2 PASS** (commits `33d8ee0` T4, `73a8b6f` T4 GATE-2 fix):
-- `scripts/lib/quota-source.js` (15/15 tests) — HeaderProbeQuotaSource + NullSource
-- GATE-2 manual smoke vs `unleashed.lan:8321`: hardcoded haiku chain → 502 (CPA dispatcher rejects). Fix Branch A applied: `CONTEXTBRICKS_QUOTA_PROBE_MODEL` env override at top of chain. Verified live with `claude-opus-4-6` → 200 OK + 13 anthropic-ratelimit headers (real account quotas). Evidence in `evidence/gate-2-probe-result.txt`.
-- Open Q1 RESOLVED empirically.
+**F-001 / CR-001-initial-scope (topology-aware-quota) — SHIPPED.** 14 commits, tag v5.0.0, npm published, GitHub release live.
 
-**Phase 4 — T5 in flight:** sonnet subagent building `scripts/lib/rate-view.js` + `scripts/lib/format/{rate-limit-line,ttl-prefix,extras-tail}.js` + ansi.js + tests. Removes `expireResetLimits` (FR-6). Background agent active.
+- **Architecture pivot:** statusline now sends `POST /v1/messages` через `$ANTHROPIC_BASE_URL` (whatever path Claude Code uses), parses `anthropic-ratelimit-unified-*` from response headers. Replaces hard-coded `api.anthropic.com/api/oauth/usage` call that broke under any proxy.
+- **Native-first, proxy-agnostic:** zero proxy-specific code paths. Native, CPA, cache-fix-chain — all transparently supported via env-var contract.
+- **9 new lib modules:** `topology, quota-source, quota-parser, creds, detect-term-width, rate-view, ansi` + `format/{rate-limit-line, ttl-prefix, extras-tail}`. Statusline.js shrunk **1142 → 362 LOC (-68%)**.
+- **GATE-2 empirical resolution:** на user's `unleashed.lan:8321` default haiku chain rejected with 502; added `CONTEXTBRICKS_QUOTA_PROBE_MODEL` env override; verified `claude-opus-4-6` → 200 OK + 13 anthropic-ratelimit headers (real data: session 28%, week 7%, etc.).
+- **Reset normalization:** unix-seconds `*-reset` headers normalized to ISO 8601 (Date-constructor-compatible).
+- **FR-9 token confidentiality:** cache stores parsed quotas only (never raw bodies, headers, tokens); subprocess receives token via env, never argv.
+- **Honest STALE UX:** `expireResetLimits()` removed; stale data renders `(stale Xh Ym)` suffix; UNAVAILABLE renders FR-8 hint enum literal instead of fake zeros.
+- **82/82 tests** — 77 unit + 5 integration, full stdin-mock contract via `_mock_topology` / `_mock_probe_response` / `_mock_now_ms`.
+- **Zero new npm deps.** Native Node built-ins only.
 
-**Next after T5:** GATE-3 byte-identity vs v4.7.0 baseline; T6 orchestrator rewrite (statusline.js 1142 → ≤400 LOC); T7+T8 (integration fixtures + CHANGELOG/version/README/engram); GATE-4 pre-release.
+**14 commits on main:** `30df69d` T1, `5c26c73` T2, `0377605` T3, `33d8ee0` T4, `73a8b6f` T4 fix, `f3d1f52` housekeeping, `b323172` T5, `3d88154` housekeeping, `a4d22bb` T6, `d2c46f3` reset-normalize, `41150db` housekeeping, `63f9901` T8 (v5.0.0 + CHANGELOG + README), `38862fa` T7 fixtures, `8998009` closeout.
 
-**Pipeline artifacts:** `.agent/specs/topology-aware-quota/{spec,plan,tasks,user_job_statement,clarification-report-2026-05-07,validation-report-2026-05-07}.md` + `checklists/requirements-quality.md` + `changes/CR-001-initial-scope/change.md` + registry `_index.json` (F-001 ACTIVE).
+**Tag + npm:** `v5.0.0` published with SLSA provenance via OIDC Trusted Publisher, CI green in 25s.
+
+**Pipeline artifacts (committed in `8998009`):** `.agent/specs/topology-aware-quota/{spec,plan,tasks,user_job_statement,clarification-report-2026-05-07,validation-report-2026-05-07}.md` + `checklists/requirements-quality.md` + `changes/CR-001-initial-scope/change.md` + registry `_index.json` (F-001 ACTIVE).
 
 ## Next (when resuming)
 

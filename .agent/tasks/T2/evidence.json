@@ -1,0 +1,144 @@
+{
+  "task_id": "T2",
+  "overall_status": "PASS",
+  "strategy": "local",
+  "aimux_state": "offline_reduced_surface",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "text": "parseRateLimitHeaders(headers) exported",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/quota-parser.js",
+          "summary": "module.exports = { parseRateLimitHeaders }; line 72"
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC2",
+      "text": "Captures /^anthropic-ratelimit-unified-(.+)-utilization$/i regex (case-insensitive)",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/quota-parser.js",
+          "summary": "Line 29: const UTIL_RE = /^anthropic-ratelimit-unified-(.+)-utilization$/i; all header keys lowercased before matching (lines 34-37); regex applied per-key in loop (line 43)"
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC3",
+      "text": "Pairs each utilization with sibling *-reset and *-status headers",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/quota-parser.js",
+          "summary": "Lines 52-54: prefix built from bucket name; lc[prefix+'-reset'] and lc[prefix+'-status'] looked up after utilization match. TC4 and TC8 tests cover sibling lookup."
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC4",
+      "text": "Maps known buckets to canonical fields per plan §API Contracts table (5h, 7d, 7d_sonnet, 7d_opus, 7d_omelette, overage)",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/quota-parser.js",
+          "summary": "Lines 20-27: CANONICAL map contains all 6 entries: 5h→five_hour, 7d→seven_day, 7d_sonnet→seven_day_sonnet, 7d_opus→seven_day_opus, 7d_omelette→seven_day_omelette, overage→extra_usage. TC1 tests all 6 are populated."
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC5",
+      "text": "Unknown buckets preserved verbatim under quotas[bucket-name]",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/quota-parser.js",
+          "summary": "Lines 63-66: else branch creates result.quotas={} if absent, then assigns result.quotas[bucket]=entry. TC2 (7d_haiku) and TC7 (5 unknown buckets) verify."
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC6",
+      "text": "Missing reset → field still present with resets_at: null",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/quota-parser.js",
+          "summary": "Line 53: const resets_at = lc[prefix+'-reset'] != null ? lc[prefix+'-reset'] : null; TC5 verifies missing reset → resets_at: null."
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC7",
+      "text": "Returns empty QuotaData on no-matching-headers (not throw)",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/quota-parser.js",
+          "summary": "Line 16: early return {} on null/non-object input. Empty object {} produces no regex matches → returns {}. TC3 and TC3b verify."
+        }
+      ],
+      "gaps": []
+    }
+  ],
+  "verification_evidence": {
+    "tests_written": 13,
+    "tests_required": 10,
+    "test_cases_covering_VE_items": {
+      "VE_1_all_6_known_buckets": "TC1: all 6 known buckets present → 6 canonical fields populated",
+      "VE_2_unknown_7d_haiku": "TC2: new bucket 7d_haiku → quotas['7d_haiku']",
+      "VE_3_empty_headers": "TC3 + TC3b: empty headers {} and null → {} (no throw)",
+      "VE_4_mixed_case": "TC4: Anthropic-Ratelimit-Unified-5H-Utilization (mixed case) → normalized, five_hour populated",
+      "VE_5_missing_reset": "TC5: *-utilization without sibling *-reset → entry present, resets_at: null",
+      "VE_6_malformed_numeric": "TC6: utilization='abc' (NaN) → bucket dropped, others preserved",
+      "VE_7_11_bucket_fixture": "TC7: hand-coded 11-bucket analog (6 canonical + 5 unknown from quota-status.json bucket names) → all 11 preserved",
+      "VE_8_status_field": "TC8 + TC8b: status captured when present; absent when not present",
+      "VE_9_reset_string_forms": "TC9a + TC9b: ISO 8601 and unix-seconds strings preserved as raw strings (no conversion)",
+      "VE_10_tokens_namespace": "TC10: anthropic-ratelimit-tokens-* headers (different namespace) → ignored entirely"
+    },
+    "eleven_bucket_fixture_note": "hand-coded analog used (spec permits this). Bucket names drawn from spec.md FR-2 text citing actual quota-status.json data: five_hour, seven_day, seven_day_sonnet, seven_day_opus, seven_day_omelette, extra_usage (6 canonical) + 7d_oauth_apps, 7d_cowork, tangelo, iguana_necktie, omelette_promotional (5 unknown).",
+    "grep_enforcement": {
+      "command": "grep -RE 'cpa|cliproxyapi|cache-fix' scripts/lib/quota-parser.js",
+      "result": "NO_MATCHES",
+      "status": "PASS",
+      "note": "Grep tool returned 'No matches found' — zero occurrences of forbidden proxy names"
+    },
+    "no_new_deps": {
+      "command": "git diff package.json",
+      "result": "package.json has no 'dependencies' or 'devDependencies' keys; grep returns no matches; zero deps changes",
+      "status": "PASS"
+    },
+    "test_trace": {
+      "method": "manual static trace — shell execution unavailable in this subagent context",
+      "all_assertions_traced": true,
+      "note": "All 13 test cases traced against implementation logic line-by-line. Each assertion maps to a verified code path in quota-parser.js. See acceptance_criteria proofs above."
+    }
+  },
+  "changed_files": [
+    "scripts/lib/quota-parser.js",
+    "scripts/test/quota-parser.test.js"
+  ],
+  "commands_for_verifier": [
+    "node --test scripts/test/quota-parser.test.js",
+    "grep -RE 'cpa|cliproxyapi|cache-fix' scripts/lib/quota-parser.js",
+    "git diff package.json"
+  ],
+  "known_gaps": [
+    "Test run exit code not directly verified via shell execution (no shell tool available in this subagent context). All 13 test cases manually traced against implementation logic — each assertion verified against code paths in quota-parser.js."
+  ]
+}

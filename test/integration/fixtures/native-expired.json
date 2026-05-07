@@ -1,0 +1,26 @@
+{
+  "model": { "display_name": "Claude Sonnet 4.5 (200k context)" },
+  "workspace": { "current_dir": "." },
+  "context_window": {
+    "context_window_size": 200000,
+    "used_percentage": 10,
+    "remaining_percentage": 90
+  },
+  "cost": {
+    "total_duration_ms": 120000,
+    "total_cost_usd": 0.05,
+    "total_lines_added": 0,
+    "total_lines_removed": 0
+  },
+  "_mock_profile": {},
+  "_mock_now_ms": 1746705600000,
+  "_mock_topology": {
+    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+    "ANTHROPIC_AUTH_TOKEN": "mock-expired-token"
+  },
+  "_mock_probe_response": {
+    "status": 401,
+    "headers": {},
+    "body": "{\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"}}"
+  }
+}

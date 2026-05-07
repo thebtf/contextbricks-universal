@@ -1,0 +1,44 @@
+{
+  "model": { "display_name": "Claude Sonnet 4.5 (200k context)" },
+  "workspace": { "current_dir": "." },
+  "context_window": {
+    "context_window_size": 200000,
+    "used_percentage": 15,
+    "remaining_percentage": 85
+  },
+  "cost": {
+    "total_duration_ms": 300000,
+    "total_cost_usd": 0.12,
+    "total_lines_added": 50,
+    "total_lines_removed": 10
+  },
+  "_mock_profile": {},
+  "_mock_now_ms": 1746619200000,
+  "_mock_topology": {
+    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+    "ANTHROPIC_AUTH_TOKEN": "mock-token"
+  },
+  "_mock_probe_response": {
+    "status": 200,
+    "headers": {
+      "anthropic-ratelimit-unified-5h-utilization": "0.28",
+      "anthropic-ratelimit-unified-5h-reset": "2026-05-07T18:00:00.000Z",
+      "anthropic-ratelimit-unified-5h-status": "allowed",
+      "anthropic-ratelimit-unified-7d-utilization": "0.07",
+      "anthropic-ratelimit-unified-7d-reset": "2026-05-14T00:00:00.000Z",
+      "anthropic-ratelimit-unified-7d-status": "allowed",
+      "anthropic-ratelimit-unified-7d_sonnet-utilization": "0.22",
+      "anthropic-ratelimit-unified-7d_sonnet-reset": "2026-05-14T00:00:00.000Z",
+      "anthropic-ratelimit-unified-7d_sonnet-status": "allowed",
+      "anthropic-ratelimit-unified-7d_opus-utilization": "0.05",
+      "anthropic-ratelimit-unified-7d_opus-reset": "2026-05-14T00:00:00.000Z",
+      "anthropic-ratelimit-unified-7d_opus-status": "allowed",
+      "anthropic-ratelimit-unified-7d_omelette-utilization": "0.01",
+      "anthropic-ratelimit-unified-7d_omelette-reset": "2026-05-14T00:00:00.000Z",
+      "anthropic-ratelimit-unified-7d_omelette-status": "allowed",
+      "anthropic-ratelimit-unified-overage-utilization": "0.00",
+      "anthropic-ratelimit-unified-overage-status": "allowed"
+    },
+    "body": "{}"
+  }
+}

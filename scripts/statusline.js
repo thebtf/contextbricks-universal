@@ -19,6 +19,7 @@
 //   CONTEXTBRICKS_RESET_EXACT=0  Approximate reset times (default: exact)
 //   CONTEXTBRICKS_RIGHT_PADDING=28  Reserve N chars on right of Line 1
 //   CONTEXTBRICKS_QUOTA_PROBE_MODEL  Override probe model (skips fallback chain)
+//   CONTEXTBRICKS_CACHE_PATH         Override quota cache file path (used by integration tests)
 //
 // See: https://code.claude.com/docs/en/statusline
 
@@ -332,6 +333,7 @@ function main() {
       quotaResult = new HeaderProbeQuotaSource({
         topology, nowMs,
         mockProbeFn: mockProbe ? () => mockProbe : null,
+        cachePath: process.env.CONTEXTBRICKS_CACHE_PATH || undefined,
       }).fetch();
     }
 

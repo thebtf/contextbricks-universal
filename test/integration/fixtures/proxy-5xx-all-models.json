@@ -1,0 +1,26 @@
+{
+  "model": { "display_name": "Claude Sonnet 4.5 (200k context)" },
+  "workspace": { "current_dir": "." },
+  "context_window": {
+    "context_window_size": 200000,
+    "used_percentage": 5,
+    "remaining_percentage": 95
+  },
+  "cost": {
+    "total_duration_ms": 60000,
+    "total_cost_usd": 0.02,
+    "total_lines_added": 0,
+    "total_lines_removed": 0
+  },
+  "_mock_profile": {},
+  "_mock_now_ms": 1746619200000,
+  "_mock_topology": {
+    "ANTHROPIC_BASE_URL": "http://proxy.example.com:8321",
+    "ANTHROPIC_AUTH_TOKEN": "sk-proxy-mock"
+  },
+  "_mock_probe_response": {
+    "status": 502,
+    "headers": {},
+    "body": "unknown provider for model"
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "task_id": "T7",
+  "overall_status": "PASS",
+  "strategy": "local",
+  "aimux_state": "online_but_delegation_surface_absent",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "text": "All 5 fixtures cover their stated topology + freshness scenario",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "test/integration/fixtures/native-fresh.json",
+          "summary": "FRESH: native topology, probe 200, full anthropic-ratelimit-unified-* headers (6 buckets)"
+        },
+        {
+          "type": "file",
+          "path": "test/integration/fixtures/native-expired.json",
+          "summary": "UNAVAILABLE: native topology, probe 401 auth-rejected, no cache"
+        },
+        {
+          "type": "file",
+          "path": "test/integration/fixtures/proxy-happy.json",
+          "summary": "FRESH: proxy topology (http://proxy.example.com:8321), probe 200, full headers"
+        },
+        {
+          "type": "file",
+          "path": "test/integration/fixtures/proxy-5xx-all-models.json",
+          "summary": "UNAVAILABLE: proxy topology, probe 502 upstream-5xx, no cache"
+        },
+        {
+          "type": "file",
+          "path": "test/integration/fixtures/no-config.json",
+          "summary": "UNAVAILABLE: empty _mock_topology (no auth), no probe, HOME overridden to tmpdir"
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC2",
+      "text": "Each fixture pipes through node scripts/statusline.js, snapshot-compares stdout",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "test/integration/fixtures.test.js",
+          "summary": "5 tests using spawnSync(node scripts/statusline.js), stdin=fixture JSON, ANSI-stripped semantic assertions. No byte-identity snapshots — avoids brittleness."
+        },
+        {
+          "type": "observation",
+          "summary": "Logic trace verified manually: native-fresh→session:28%/week:7%; native-expired→[auth token rejected]; proxy-happy→session:45%/week:12%; proxy-5xx→[API unreachable]; no-config→[no API auth]. All match FR-8 enum literals in rate-limit-line.js HINT_MESSAGES."
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC3",
+      "text": "Mock contract doc explains the 3 new mock fields with examples",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "test/README.md",
+          "summary": "30-line doc covering _mock_topology, _mock_probe_response, _mock_now_ms with table, legacy fields, add-fixture instructions, cache isolation explanation"
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC4",
+      "text": "No new npm dev-dep (NFR-4)",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "package.json",
+          "summary": "No dependencies or devDependencies keys in package.json. Test runner uses node:test (builtin), child_process, fs, os, path — all Node builtins."
+        }
+      ],
+      "gaps": []
+    }
+  ],
+  "changed_files": [
+    "scripts/statusline.js",
+    "test/integration/fixtures/native-fresh.json",
+    "test/integration/fixtures/native-expired.json",
+    "test/integration/fixtures/proxy-happy.json",
+    "test/integration/fixtures/proxy-5xx-all-models.json",
+    "test/integration/fixtures/no-config.json",
+    "test/integration/fixtures.test.js",
+    "test/README.md"
+  ],
+  "commands_for_verifier": [
+    "node --test test/integration/fixtures.test.js",
+    "node --test scripts/test/topology.test.js scripts/test/quota-parser.test.js scripts/test/creds.test.js scripts/test/quota-source.test.js scripts/test/rate-view.test.js scripts/test/format/rate-limit-line.test.js test/integration/fixtures.test.js",
+    "git diff package.json"
+  ],
+  "known_gaps": [],
+  "notes": {
+    "aimux_degradation": "aimux health check succeeded (CLIs available) but the agent/agents/workflow delegation surface was removed in Layer 5 purge. Only sessions, status, think, deepresearch remain. Self-executed as Medium tier (7 new/modified files, ~250 LOC, no novel patterns).",
+    "statusline_change": "Added CONTEXTBRICKS_CACHE_PATH env var support (1 line in HeaderProbeQuotaSource constructor + 1 comment line) for per-test cache isolation. No behavior change when env var unset.",
+    "proxy_5xx_behavior": "502 with body 'unknown provider for model' correctly produces upstream-5xx hint, NOT no-model hint. isModelNotFound() returns false for any 5xx status — model-not-found chain only applies to 4xx. Documented in test comment.",
+    "macos_keychain_protection": "_mock_profile: {} added to all fixtures to short-circuit fetchUserProfile and prevent real macOS keychain/HTTP calls during integration tests."
+  }
+}

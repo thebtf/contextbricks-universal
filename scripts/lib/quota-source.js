@@ -375,12 +375,22 @@ class HeaderProbeQuotaSource {
   _probe(cache) {
     const { target, authToken } = this.topology;
 
-    // Determine starting model from cache (if known and valid in chain)
-    const startModel = cache && cache.probe_model && PROBE_MODELS.includes(cache.probe_model)
-      ? cache.probe_model
-      : PROBE_MODELS[0];
-    const startIdx = PROBE_MODELS.indexOf(startModel);
-    const modelChain = PROBE_MODELS.slice(startIdx);
+    // Build the effective chain. Priority order:
+    //   1. CONTEXTBRICKS_QUOTA_PROBE_MODEL env override (user-explicit) — first
+    //   2. Cached working model (last successful probe) — second
+    //   3. Default fallback chain (haiku tiers + safety net) — rest
+    // This handles proxies whose model dispatcher uses non-Anthropic-native
+    // names: the user pins a model that round-trips successfully via env.
+    const userPinnedModel = process.env.CONTEXTBRICKS_QUOTA_PROBE_MODEL;
+    const cachedModel = cache && cache.probe_model;
+    const seen = new Set();
+    const modelChain = [];
+    for (const candidate of [userPinnedModel, cachedModel, ...PROBE_MODELS]) {
+      if (candidate && !seen.has(candidate)) {
+        seen.add(candidate);
+        modelChain.push(candidate);
+      }
+    }
 
     // Determine starting anthropic-beta value
     // If cache has a recorded value (including null = "no beta"), use it.

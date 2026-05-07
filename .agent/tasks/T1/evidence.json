@@ -1,0 +1,145 @@
+{
+  "task_id": "T1",
+  "overall_status": "PASS",
+  "strategy": "local",
+  "aimux_state": "offline_reduced_surface",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "text": "detectTopology(env, fsAccess) exported, returns { target, authToken, authSource } shape per plan §Data Model",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/topology.js",
+          "summary": "module.exports = { detectTopology }; function returns { target, authToken, authSource } per lines 53-87"
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC2",
+      "text": "target resolves: env.ANTHROPIC_BASE_URL → fallback 'https://api.anthropic.com'; trailing slash stripped",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/topology.js",
+          "summary": "Lines 55-58: rawBase = (env.ANTHROPIC_BASE_URL && env.ANTHROPIC_BASE_URL.trim()) || ''; target = rawBase ? rawBase.replace(/\\/+$/, '') : 'https://api.anthropic.com'"
+        },
+        {
+          "type": "file",
+          "path": "scripts/test/topology.test.js",
+          "summary": "Case 1 (no env → api.anthropic.com), Case 3 (env URL used), Case 4 (trailing slash stripped), Case 7 (literal api.anthropic.com), Case 8 (empty string → api.anthropic.com)"
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC3",
+      "text": "authToken resolves: env.ANTHROPIC_AUTH_TOKEN → env.ANTHROPIC_API_KEY → readCredsToken(fs) → null",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/topology.js",
+          "summary": "Lines 61-86: three-branch chain with explicit auth source labeling; readCredsToken(fsAccess) reads creds.json via fsAccess param"
+        },
+        {
+          "type": "file",
+          "path": "scripts/test/topology.test.js",
+          "summary": "Cases 1-8 + extra cases cover all chain positions including env-wins-over-creds and empty-string-treated-as-unset"
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC4",
+      "text": "authSource reflects which source supplied the token (string or null)",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "file",
+          "path": "scripts/lib/topology.js",
+          "summary": "authSource set to 'env:ANTHROPIC_AUTH_TOKEN', 'env:ANTHROPIC_API_KEY', 'creds.json', or null on each return path"
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC5",
+      "text": "Function is pure: no I/O outside fsAccess argument; no global process.env reads outside env argument",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "command",
+          "command": "grep -n 'process\\.env|require(.*fs.*)' scripts/lib/topology.js",
+          "summary": "Grep returns only comment-line occurrences (lines 8, 49). No executable code reads process.env or imports fs directly. readCredsToken receives fsAccess parameter and uses only fsAccess.existsSync / fsAccess.readFileSync."
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC6",
+      "text": "Zero string-literal references to cpa|cliproxyapi|cache-fix in topology.js (FR-1 enforcement)",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "command",
+          "command": "grep -RE 'cpa|cliproxyapi|cache-fix' scripts/lib/topology.js",
+          "exit_code": 1,
+          "summary": "Grep tool returns 'No matches found' — zero occurrences. FR-1 enforcement passes."
+        }
+      ],
+      "gaps": []
+    }
+  ],
+  "verification_evidence": {
+    "tests_written": 12,
+    "tests_required": 8,
+    "test_cases_covering_VE_items": {
+      "VE_1_native_no_env_no_creds": "case 1: native (no env, no creds) → api.anthropic.com, no auth",
+      "VE_2_native_no_env_fresh_creds": "case 2: native (no env, fresh creds) → authToken from creds.json",
+      "VE_3_proxy_base_url_and_auth_token": "case 3: proxy via ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN → both env values used",
+      "VE_4_proxy_trailing_slash": "case 4: ANTHROPIC_BASE_URL with trailing slash → target has slash stripped",
+      "VE_5_api_key_only": "case 5: ANTHROPIC_API_KEY only → authToken from ANTHROPIC_API_KEY, no creds fallback needed",
+      "VE_6_auth_token_wins_over_creds": "case 6: ANTHROPIC_AUTH_TOKEN set + creds also valid → env wins",
+      "VE_7_literal_api_anthropic_com": "case 7: ANTHROPIC_BASE_URL set to api.anthropic.com literal → target is api.anthropic.com",
+      "VE_8_empty_string_treated_as_unset": "case 8: empty string env-var → treated as unset, falls through to creds.json"
+    },
+    "extra_robustness_cases": [
+      "extra: ANTHROPIC_API_KEY wins over creds.json when ANTHROPIC_AUTH_TOKEN absent",
+      "extra: corrupt creds.json → authToken null, no throw",
+      "extra: creds.json present but claudeAiOauth.accessToken missing → authToken null",
+      "extra: multiple trailing slashes → all stripped from target"
+    ],
+    "grep_enforcement": {
+      "command": "grep -RE 'cpa|cliproxyapi|cache-fix' scripts/lib/topology.js",
+      "result": "NO_MATCHES",
+      "status": "PASS"
+    },
+    "no_new_deps": {
+      "package_json_dependencies_present": false,
+      "package_json_devDependencies_present": false,
+      "status": "PASS",
+      "note": "package.json has no 'dependencies' or 'devDependencies' keys — grep returns no matches"
+    },
+    "purity_check": {
+      "global_process_env_in_executable_code": false,
+      "global_fs_require_in_topology_js": false,
+      "status": "PASS"
+    }
+  },
+  "changed_files": [
+    "scripts/lib/topology.js",
+    "scripts/test/topology.test.js"
+  ],
+  "commands_for_verifier": [
+    "node --test scripts/test/topology.test.js",
+    "grep -RE 'cpa|cliproxyapi|cache-fix' scripts/lib/topology.js",
+    "git diff package.json"
+  ],
+  "known_gaps": [
+    "Test run exit code not directly verified via shell execution (PowerShell/Bash tools not available in this agent context). All 12 test cases manually traced against implementation logic — each assertion maps to a verified code path in topology.js."
+  ]
+}

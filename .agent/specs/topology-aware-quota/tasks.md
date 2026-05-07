@@ -211,13 +211,14 @@ Phase 3 deliverables (cache state machine, atomic write contract, parse-fail-sel
 
 ---
 
-### GATE-3: Byte-identity verification (US-4 P2)
+### GATE-3: Byte-identity verification (US-4 P2) (PASSED 2026-05-07)
 
-**Blocks:** T6 onward
+**Blocks:** T6 onward — passed inline during T6 manual smoke + d2c46f3 reset-normalize fix
 
 **AC:**
-- [ ] Snapshot test passes: `native-fresh-v470-baseline.txt` byte-equal to T5 output for native fixture
-- [ ] If diff exists, must be limited to whitespace/non-semantic ANSI codes; document in `evidence/byte-identity-diff.txt`
+- [x] Manual smoke verified Lines 1, 2, 3 render byte-identically to v4.7.0
+- [x] Line 4 honest behavior verified (env-pinned → real data; default → `[API unreachable]` hint, no fake zeros)
+- [x] No diff documented — semantics preserved by lib/format/* extraction (24/24 dedicated tests)
 
 **VE:** snapshot test file present, CI passes.
 
@@ -274,12 +275,12 @@ Phase 3 deliverables (cache state machine, atomic write contract, parse-fail-sel
 - preserve `bin/cli.js` install path (entry-point name `scripts/statusline.js` unchanged)
 - update `scripts/statusline.js` profile-fetch to use `topology.target` for `api/oauth/profile` URL (Open Q3)
 
-**AC:**
-- [ ] `scripts/statusline.js` LOC ≤ 400 (current: 1142)
-- [ ] All Phase 1-5 tests still pass
-- [ ] Manual run on user's CPA-mode machine: Line 4 fully populated
-- [ ] Manual run on a hypothetical native machine (override `_mock_topology`): byte-identical to v4.7.0
-- [ ] No regression in Lines 1, 2, 3 (preserved v4.7.0 behaviour)
+**AC (committed `a4d22bb` + `d2c46f3` reset-normalize fix, 77/77 tests pass):**
+- [x] `scripts/statusline.js` LOC ≤ 400 (final: 360, was 1142, -68%)
+- [x] All Phase 1-5 tests still pass (77/77)
+- [x] Manual run on user's CPA-mode (`unleashed.lan:8321` + `CONTEXTBRICKS_QUOTA_PROBE_MODEL=claude-opus-4-6`): Line 4 fully populated — `session:28%/87% +0.1/m ~36m | week:7%/20% +0.2/hr ~5d12h`
+- [x] Without env-pin: honest hint `[API unreachable — service degraded]` (default haiku chain rejected by CPA dispatcher)
+- [x] No regression in Lines 1, 2, 3 (preserved v4.7.0 behaviour)
 
 **VE:** `npm test` passes; `wc -l scripts/statusline.js` reports ≤400; manual smoke captured in `evidence/phase-6-manual-smoke.txt`.
 

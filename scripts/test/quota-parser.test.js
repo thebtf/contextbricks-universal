@@ -60,7 +60,8 @@ test('TC2: unknown bucket 7d_haiku → quotas[7d_haiku]', () => {
   assert.ok(!('seven_day_haiku' in result), 'no spurious canonical field');
   assert.ok(result.quotas && '7d_haiku' in result.quotas, 'quotas[7d_haiku] present');
   assert.strictEqual(result.quotas['7d_haiku'].utilization, 0.33);
-  assert.strictEqual(result.quotas['7d_haiku'].resets_at, '1778007600');
+  // Unix-seconds normalized to ISO 8601 (downstream Date constructor needs it)
+  assert.strictEqual(result.quotas['7d_haiku'].resets_at, new Date(1778007600 * 1000).toISOString());
 });
 
 // ---------------------------------------------------------------------------
@@ -91,7 +92,7 @@ test('TC4: mixed-case header keys normalized', () => {
 
   assert.ok('five_hour' in result, 'five_hour parsed from mixed-case key');
   assert.strictEqual(result.five_hour.utilization, 0.42);
-  assert.strictEqual(result.five_hour.resets_at, '1777683000');
+  assert.strictEqual(result.five_hour.resets_at, new Date(1777683000 * 1000).toISOString());
   assert.strictEqual(result.five_hour.status, 'allowed');
 });
 
@@ -241,16 +242,18 @@ test('TC9a: resets_at preserved as ISO 8601 string (no conversion)', () => {
   assert.strictEqual(result.five_hour.resets_at, '2026-05-07T18:30:00.000Z');
 });
 
-test('TC9b: resets_at preserved as unix-seconds string (no conversion)', () => {
+test('TC9b: resets_at unix-seconds normalized to ISO 8601 (Date-constructor compatible)', () => {
   const headers = {
     'anthropic-ratelimit-unified-7d-utilization': '0.75',
     'anthropic-ratelimit-unified-7d-reset':       '1778007600',
   };
 
   const result = parseRateLimitHeaders(headers);
-  // Raw string preserved — NOT parsed to a number
-  assert.strictEqual(result.seven_day.resets_at, '1778007600');
+  // Unix-seconds (10-digit) normalized to ISO 8601. Pass-through for ISO inputs.
+  assert.strictEqual(result.seven_day.resets_at, new Date(1778007600 * 1000).toISOString());
   assert.strictEqual(typeof result.seven_day.resets_at, 'string');
+  // Verify it parses cleanly as a Date
+  assert.ok(!isNaN(new Date(result.seven_day.resets_at).getTime()), 'reset value parses as valid Date');
 });
 
 // ---------------------------------------------------------------------------

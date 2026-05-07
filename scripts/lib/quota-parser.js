@@ -12,6 +12,37 @@
  * @param {Object<string, string>} headers — HTTP response headers (any case)
  * @returns {Object} QuotaData shape
  */
+/**
+ * Normalize a *-reset header value into an ISO-8601 string Date can parse.
+ *
+ * The Messages API response (when proxied through CPA or hit directly) returns
+ * `anthropic-ratelimit-unified-*-reset` as a UNIX-SECONDS string (e.g. "1777683000").
+ * The OAuth /api/oauth/usage endpoint returns ISO-8601. Downstream `new Date(x)`
+ * does not parse a 10-digit unix-seconds string correctly — yields Invalid Date.
+ *
+ * Detection: pure digits and length 9-11 → unix seconds. Otherwise pass through
+ * (ISO 8601, ms-string, or anything else Date already understands).
+ *
+ * @param {string|null|undefined} value
+ * @returns {string|null}
+ */
+function normalizeResetValue(value) {
+  if (value == null) return null;
+  const s = String(value).trim();
+  if (s === '') return null;
+  // Unix seconds: 9-11 digit integer (covers 2001-09-09 through 5138-11-16).
+  if (/^\d{9,11}$/.test(s)) {
+    const ms = Number(s) * 1000;
+    return new Date(ms).toISOString();
+  }
+  // Unix milliseconds: 13-digit integer.
+  if (/^\d{13}$/.test(s)) {
+    return new Date(Number(s)).toISOString();
+  }
+  // ISO 8601 or unknown — pass through unchanged.
+  return s;
+}
+
 function parseRateLimitHeaders(headers) {
   if (!headers || typeof headers !== 'object') return {};
 
@@ -50,7 +81,8 @@ function parseRateLimitHeaders(headers) {
     if (isNaN(utilization)) continue;
 
     const prefix = `anthropic-ratelimit-unified-${bucket}`;
-    const resets_at = lc[`${prefix}-reset`] != null ? lc[`${prefix}-reset`] : null;
+    const rawReset = lc[`${prefix}-reset`];
+    const resets_at = normalizeResetValue(rawReset);
     const status    = lc[`${prefix}-status`] != null ? lc[`${prefix}-status`] : undefined;
 
     const entry = { utilization, resets_at };

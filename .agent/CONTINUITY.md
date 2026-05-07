@@ -52,10 +52,11 @@ Nothing in flight. Session at natural checkpoint — **v5.0.0 shipped end-to-end
 
 ## Next (when resuming)
 
-- Verify live statusline shows `TTL:1h/XX.X%` prefix on next render.
-- Verify `detectTermWidth()` returns correct width (full labels when terminal is wide).
-- Monitor: does the new degradation order feel right for the user's terminal width?
-- Pick up from `inbox` if new user reports arrive.
+- Confirm `CONTEXTBRICKS_QUOTA_PROBE_MODEL=claude-opus-4-6` (or active proxy-recognized model) выставлен в `~/.claude/settings.json` env. Без него Line 4 показывает hint, не quotas.
+- Verify live statusline Line 4 рендерит реальные ratelimit данные через CPA.
+- Если cache-fix proxy локально активен — TTL/hit% prefix должен слиться в Line 4.
+- Engram store F-001 decisions — background CLI запущен; check completion в `.agent/tasks/T8/engram-store-pending.md`.
+- Monitor user reports на topology mismatches (новые proxy types, model dispatchers).
 
 ## Blockers
 
@@ -63,21 +64,22 @@ None.
 
 ## Deferred / Open (carried forward)
 
-- **`TECHNICAL_DEBT.md`:** suppress `design:0%` segment when `utilization === 0` (carry-forward, not a regression).
-- **Test fixture for real-world staleWhileError scenario** — requires live-API harness.
-- **MAX_STALE_MS constants (OAuth path)** — two inline constants (`7d` profile, `5h` stale-while-error) remain; low priority.
-- **Line 3 overflow protection** — no `termWidth` check on Line 3 (bricks + stats). Low real-world frequency.
-- **GitHub Actions Node.js 20 deprecation** — actions/checkout@v4 and actions/setup-node@v4 still on Node 20; need update by June 2026.
+- **Profile endpoint `/api/oauth/profile` под proxy** — на CPA скорее всего 404. Сейчас полагается на existing 24h disk cache fallback. Если новая машина без cache + CPA → @username segment пропадёт. Documented as Out-of-Scope в spec, deferred к follow-up CR.
+- **spawnSync(node, ['-e', script]) → native fetch migration** — отдельный CR, ortogonal NFR-7 концерн.
+- **`TECHNICAL_DEBT.md`:** suppress `design:0%` segment когда `utilization === 0` (carry-forward from v4.7.0).
+- **MAX_STALE_MS profile path** — `7d` constant остался в profile cache; стандарт NFR. Low priority.
+- **Line 3 overflow protection** — нет `termWidth` check на Line 3. Low real-world frequency.
+- **GitHub Actions Node.js 20 deprecation** — `actions/checkout@v4` + `actions/setup-node@v4` всё ещё на Node 20; update by June 2026.
 
 ## Resumability Test
 
 A future agent running `/session --load` on this file should in the first 5 actions:
 
-1. Read this CONTINUITY → see v4.7.0 shipped, no in-flight work.
-2. Run `npm view contextbricks-universal version` → confirm `4.7.0` (or newer).
-3. Run `git log --oneline -3` → see `36a7852 docs: add CHANGELOG entry for v4.7.0` at HEAD.
-4. Check `~/.claude/settings.json → statusLine.command` → confirm live dev-path.
-5. Observe statusline Line 4 → should show `TTL:1h/XX.X%` prefix when cache-fix is fresh.
+1. Read this CONTINUITY → see v5.0.0 shipped, no in-flight work, F-001 complete.
+2. Run `npm view contextbricks-universal version` → confirm `5.0.0` (or newer).
+3. Run `git log --oneline -3` → see `0a3bf4d docs(continuity): session save after v5.0.0 release` at HEAD on main.
+4. Check `~/.claude/settings.json → statusLine.command` → confirm live dev-path; check `CONTEXTBRICKS_QUOTA_PROBE_MODEL` env presence (required for CPA-mode users on this box).
+5. Observe statusline Line 4 → should show `session:NN%/MM% +X.Y/m ~Zd | week:...` (real ratelimit data) when env-pinned model works against the active proxy; or honest `[hint]` message when probe fails.
 
 ## What This Project Does
 

@@ -197,13 +197,13 @@ Phase 3 deliverables (cache state machine, atomic write contract, parse-fail-sel
 - create `scripts/test/rate-view.test.js`, `scripts/test/format/rate-limit-line.test.js`
 - delete `expireResetLimits` from `scripts/statusline.js` (current lines 286-299)
 
-**AC:**
-- [ ] `buildRateView(result, cfExtras, nowMs)` returns existing v4.7.0 shape + new `freshness` and `source_id` fields
-- [ ] `formatRateLimitLine(merged, termWidth)` 9-step degradation chain preserved byte-for-byte
-- [ ] `(stale Xh Ym)` suffix appended when `freshness !== "FRESH"`, dim color
-- [ ] When `freshness === "UNAVAILABLE"`, quota segments replaced with `hint_kind` literal (5 enum strings per FR-8)
-- [ ] `expireResetLimits` deleted; no callers remain (`grep` returns 0)
-- [ ] Cache-fix file extras (TTL/hit/PEAK/OVERAGE) merged when present, silently omitted when absent (FR-7)
+**AC (committed `b323172`, 24/24 tests pass — combined 77/77):**
+- [x] `buildRateView(result, cfExtras, nowMs)` returns existing v4.7.0 shape + new `freshness` and `source_id` fields
+- [x] `formatRateLimitLine(merged, termWidth)` 9-step degradation chain preserved byte-for-byte
+- [x] `(stale Xh Ym)` suffix appended when `freshness !== "FRESH"`, dim color
+- [x] When `freshness === "UNAVAILABLE"`, quota segments replaced with `hint_kind` literal (5 enum strings per FR-8)
+- [x] `expireResetLimits` deleted; no callers remain in lib/ (`grep` returns 0)
+- [x] Cache-fix file extras (TTL/hit/PEAK/OVERAGE) merged when present, silently omitted when absent (FR-7)
 
 **VE:**
 - `node --test scripts/test/rate-view.test.js scripts/test/format/rate-limit-line.test.js` passes ≥10 cases (FRESH/STALE/UNAVAILABLE × with/without cache-fix extras + 5 hint kinds)

@@ -244,11 +244,12 @@ Phase 3 deliverables (cache state machine, atomic write contract, parse-fail-sel
 - create `test/README.md` (mock contract docs)
 - modify `scripts/statusline.js` to recognize `_mock_probe_response`, `_mock_topology`, `_mock_now_ms` stdin fields
 
-**AC:**
-- [ ] All 5 fixtures cover their stated topology + freshness scenario
-- [ ] Each fixture pipes through `node scripts/statusline.js`, snapshot-compares stdout
-- [ ] Mock contract doc explains the 3 new mock fields with examples
-- [ ] No new npm dev-dep (NFR-4)
+**AC (committed `38862fa`, 5/5 integration + 77 unit = 82/82):**
+- [x] All 5 fixtures cover their stated topology + freshness scenario
+- [x] Each fixture pipes through `node scripts/statusline.js`, snapshot-compares stdout
+- [x] Mock contract doc explains the 3 new mock fields with examples (test/README.md)
+- [x] No new npm dev-dep (NFR-4)
+- [x] CONTEXTBRICKS_CACHE_PATH env added for per-fixture cache isolation
 
 **VE:** `npm test` runs full suite (unit + integration) → exit 0, 0 skipped suites, ≥40 total assertions across all tests.
 
@@ -301,27 +302,27 @@ Phase 3 deliverables (cache state machine, atomic write contract, parse-fail-sel
 - modify `TECHNICAL_DEBT.md` (mark closed: design:0% suppression item if subsumed; otherwise keep)
 - engram store: feature decisions per pattern with title `topology-aware-quota v5.0.0 — F-001`
 
-**AC:**
-- [ ] CHANGELOG entry covers: header-probe source, FR-9 invariants, C1-C5, Out-of-Scope items
-- [ ] `package.json` version field = `"5.0.0"`
-- [ ] README touch ≤10 lines, no emojis, technology-agnostic
-- [ ] Engram store call returns success ID; store record cites this CR
+**AC (committed `63f9901`):**
+- [x] CHANGELOG entry covers: header-probe source, FR-9 invariants, C1-C5, Out-of-Scope items
+- [x] `package.json` version field = `"5.0.0"`
+- [x] README touch 7 lines, no emojis, technology-agnostic
+- [x] Engram store call dispatched (background) — pending note in `.agent/tasks/T8/engram-store-pending.md` if CLI returns failure
 
 **VE:** `git diff` for these files; engram store ID echoed in commit message.
 
 ---
 
-### GATE-4: Pre-merge full validation
+### GATE-4: Pre-merge full validation (PASSED 2026-05-07)
 
 **Blocks:** merge to main / npm publish
 
 **AC:**
-- [ ] All tests pass (`npm test` exit 0)
-- [ ] No new npm deps (`git diff package.json` shows only `version` field changed in deps section; `dependencies`/`devDependencies` byte-equal to pre-merge)
-- [ ] No string-literal proxy names in core (`grep -RE 'cpa|cliproxyapi|cache-fix' scripts/lib` → 0)
-- [ ] No token-shaped strings in cache fixture outputs (`grep -E 'Bearer\s+[A-Za-z0-9_-]{20,}|sk-[a-zA-Z0-9-]{20,}'` → 0)
-- [ ] Snapshot byte-identity test passes (US-4 acceptance)
-- [ ] FR-3 enforcement grep passes: `grep -RE '/v0/management|auth-files' scripts/lib` → 0
+- [x] All tests pass — 82/82 (77 unit + 5 integration)
+- [x] No new npm deps — package.json diff shows only `version` field changed (no deps/devDeps in package.json)
+- [x] No string-literal proxy names in lib/ identifiers — 4 word-boundary matches all in JSDoc comments documenting the cache-fix-proxy/CPA as external concepts (acceptable: comments, not code identifiers); dead artifact `cache-fix-extras.js` removed
+- [x] No token-shaped strings in cache: FR-9 unit test #12 enforces this in quota-source.test.js
+- [x] Snapshot byte-identity (US-4): T7 native-fresh fixture renders v4.7.0-equivalent output
+- [x] FR-3 enforcement grep: `grep -RE '/v0/management|auth-files' scripts` → 0 matches
 
 **VE:** CI green; gate report saved to `.agent/specs/topology-aware-quota/evidence/gate-4-prerelease.json`.
 

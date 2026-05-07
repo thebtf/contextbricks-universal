@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "next_f_id": 2,
+  "features": [
+    {
+      "f_id": "F-001",
+      "slug": "topology-aware-quota",
+      "title": "Topology-Aware Quota Source — Statusline Walks Where Claude Walks",
+      "state": "ACTIVE",
+      "active_change_request": "CR-001-initial-scope",
+      "created": "2026-05-07",
+      "last_modified": "2026-05-07",
+      "spec_path": ".agent/specs/topology-aware-quota/spec.md",
+      "elevation": {
+        "from_state": "INFORMAL",
+        "elevated_at": "2026-05-07",
+        "preserved_artifact": "changes/CR-001-initial-scope/change.md (was design.md)"
+      }
+    }
+  ],
+  "informal_orphans": [
+    {
+      "path": ".agent/specs/rate-limit-refactor-v4.6.1/",
+      "note": "Pre-registry feature folder; not elevated. Out of scope for F-001."
+    },
+    {
+      "path": ".agent/specs/stale-cache-and-ttl.md",
+      "note": "Orphan single-file note; not part of any feature. Out of scope."
+    }
+  ]
+}

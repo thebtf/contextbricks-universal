@@ -28,7 +28,24 @@
 
 ## Now
 
-Nothing in flight. Session at natural checkpoint — v4.7.0 shipped end-to-end.
+**F-001 / CR-001-initial-scope (topology-aware-quota) — IMPLEMENT in flight.**
+
+**Phase 1 GATE-1 PASS** (commits `30df69d` T1, `5c26c73` T2, `0377605` T3 on `main`):
+- `scripts/lib/topology.js` (12/12 tests) — detectTopology native-first
+- `scripts/lib/quota-parser.js` (13/13 tests) — pass-through-unknown buckets
+- `scripts/lib/creds.js` + `scripts/lib/detect-term-width.js` (13/13 tests) — extracted 1:1
+- Combined: 38/38 tests, statusline.js v4.7.0 baseline still renders, 0 string-literals, 0 deps changes
+
+**Phase 2 + GATE-2 PASS** (commits `33d8ee0` T4, `73a8b6f` T4 GATE-2 fix):
+- `scripts/lib/quota-source.js` (15/15 tests) — HeaderProbeQuotaSource + NullSource
+- GATE-2 manual smoke vs `unleashed.lan:8321`: hardcoded haiku chain → 502 (CPA dispatcher rejects). Fix Branch A applied: `CONTEXTBRICKS_QUOTA_PROBE_MODEL` env override at top of chain. Verified live with `claude-opus-4-6` → 200 OK + 13 anthropic-ratelimit headers (real account quotas). Evidence in `evidence/gate-2-probe-result.txt`.
+- Open Q1 RESOLVED empirically.
+
+**Phase 4 — T5 in flight:** sonnet subagent building `scripts/lib/rate-view.js` + `scripts/lib/format/{rate-limit-line,ttl-prefix,extras-tail}.js` + ansi.js + tests. Removes `expireResetLimits` (FR-6). Background agent active.
+
+**Next after T5:** GATE-3 byte-identity vs v4.7.0 baseline; T6 orchestrator rewrite (statusline.js 1142 → ≤400 LOC); T7+T8 (integration fixtures + CHANGELOG/version/README/engram); GATE-4 pre-release.
+
+**Pipeline artifacts:** `.agent/specs/topology-aware-quota/{spec,plan,tasks,user_job_statement,clarification-report-2026-05-07,validation-report-2026-05-07}.md` + `checklists/requirements-quality.md` + `changes/CR-001-initial-scope/change.md` + registry `_index.json` (F-001 ACTIVE).
 
 ## Next (when resuming)
 

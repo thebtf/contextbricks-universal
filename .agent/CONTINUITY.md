@@ -1,13 +1,46 @@
 # ContextBricks Universal — Continuity
 
-## Project State (2026-05-07)
+## Project State (2026-06-08)
 
-**Version:** 5.0.0 — live on npm with SLSA provenance (Trusted Publisher OIDC)
-**Branch:** `main` (HEAD = `8998009` — closeout commit for CR-001-initial-scope)
-**Latest tag:** `v5.0.0` (https://github.com/thebtf/contextbricks-universal/releases/tag/v5.0.0)
-**Prior:** v4.7.0 (published 2026-04-26)
-**Local wiring:** `~/.claude/settings.json → statusLine.command` points to
-`D:/Dev/contentbricks-universal/scripts/statusline.js` (live dev — not a copy).
+**Version:** 5.0.1 — live on npm with SLSA provenance (Trusted Publisher OIDC)
+**Branch:** `main` (HEAD = `df24845` — squash-merge of CR-002-installer-fix)
+**Latest tag:** `v5.0.1` (https://github.com/thebtf/contextbricks-universal/releases/tag/v5.0.1)
+**Prior:** v5.0.0 (2026-05-07), v4.7.0 (2026-04-26)
+**Local wiring:** `~/.claude/settings.json → statusLine.command` =
+`C:/nvm4w/nodejs/node.exe C:/Users/btf/.claude/statusline.js` — packaged
+install (copy from `~/AppData/Roaming/npm/node_modules/contextbricks-universal`),
+not the live dev path of prior sessions. Source of truth = npm package.
+
+## Done (this session, 2026-06-08)
+
+**CR-002-installer-fix → v5.0.1 SHIPPED.** Fresh-machine sanity check after
+config loss revealed `npm i -g contextbricks-universal@5.0.0` was crashing
+on first invocation with `Error: Cannot find module './lib/ansi'` — v5.0.0's
+9-module split was not copied by `bin/cli.js install`.
+
+- **5 review rounds** (CodeRabbit + Gemini). CodeRabbit APPROVED on R4.
+  Final shape: structurally hardened install/uninstall.
+- **Atomic rollback:** Step 1 fail restores prior lib/; Step 2 fail
+  restores BOTH script AND lib (no hybrid state).
+- **Crash-safe install order:** lib/ first, statusline.js second.
+- **Windows EBUSY safety:** uninstall unlinkSync/rmSync wrapped in
+  try/catch — settings.json cleanup always completes.
+- **Broken symlink hygiene:** `pathEntryExists()` helper via
+  `fs.lstatSync({throwIfNoEntry:false})` + try/catch for EACCES/EPERM/ELOOP.
+- **Partial-INSTALL_LIB_DIR cleanup:** rmSync before renameSync (Windows
+  non-empty-dir failure mode).
+- **README + engines.node + change.md Evidence all aligned at `>=16.7`.**
+
+**6 commits squashed into `df24845`:** initial fix, R1 amend, R2-rmSync-trycatch,
+R3-MAJOR-rollback-partial, R4-atomic-rollback, R5-pathEntryExists-EACCES.
+
+**Tag + npm:** `v5.0.1` published via OIDC Trusted Publisher (no NPM_TOKEN).
+
+**Deployed on this box (2026-06-08):** `npm i -g contextbricks-universal@5.0.1`
+verified — Line 4 renders real CPA quota (`session:5%/72% week:21%/73%`).
+**Restart Claude Code to see new statusbar in active session.**
+
+## Prior session (2026-05-07): v5.0.0 / F-001 / CR-001-initial-scope shipped
 
 ## Done (this session, 2026-04-26)
 
@@ -28,9 +61,25 @@
 
 ## Now
 
-Nothing in flight. Session at natural checkpoint — **v5.0.0 shipped end-to-end**.
+Nothing in flight. Session at natural checkpoint — **v5.0.1 shipped end-to-end**.
 
-## Done (this session, 2026-05-07)
+## Next (when resuming)
+
+- **Restart Claude Code** to actually see v5.0.1 statusbar render in a session.
+- Decide on `CONTEXTBRICKS_QUOTA_PROBE_MODEL=claude-opus-4-6` in
+  `~/.claude/settings.json` env — without it, primary Line 4 hits hint when
+  default haiku-chain fails against `unleashed.lan:8321` CPA dispatcher.
+  (Already verified by Round-5 smoke tests it falls back correctly; the
+  env override removes the fallback round-trip cost.)
+- Engram store for both F-001 (carried) and CR-002 — engram CLI still not
+  configured on this box. Run `/engram:setup` if pursuing.
+- Consider CR-003 for cache-fix v3.5.0+ schema split in `meter-extras.js`
+  (account.json + sessions/<sid>.json — currently we read removed legacy
+  `quota-status.json` and never-existed `claude-meter.jsonl`). Not blocking
+  for this user (cache-fix runs on remote `unleashed.lan`), but matters for
+  any user with local cache-fix proxy.
+
+## Done (prior session, 2026-05-07)
 
 **F-001 / CR-001-initial-scope (topology-aware-quota) — SHIPPED.** 14 commits, tag v5.0.0, npm published, GitHub release live.
 
@@ -50,13 +99,10 @@ Nothing in flight. Session at natural checkpoint — **v5.0.0 shipped end-to-end
 
 **Pipeline artifacts (committed in `8998009`):** `.agent/specs/topology-aware-quota/{spec,plan,tasks,user_job_statement,clarification-report-2026-05-07,validation-report-2026-05-07}.md` + `checklists/requirements-quality.md` + `changes/CR-001-initial-scope/change.md` + registry `_index.json` (F-001 ACTIVE).
 
-## Next (when resuming)
+## Prior session Next (carried forward, see new Next above)
 
-- Confirm `CONTEXTBRICKS_QUOTA_PROBE_MODEL=claude-opus-4-6` (or active proxy-recognized model) выставлен в `~/.claude/settings.json` env. Без него Line 4 показывает hint, не quotas.
-- Verify live statusline Line 4 рендерит реальные ratelimit данные через CPA.
-- Если cache-fix proxy локально активен — TTL/hit% prefix должен слиться в Line 4.
-- Engram store F-001 decisions — background CLI запущен; check completion в `.agent/tasks/T8/engram-store-pending.md`.
-- Monitor user reports на topology mismatches (новые proxy types, model dispatchers).
+- Engram store F-001 decisions — still pending; engram CLI not configured on this box.
+- Cache-fix runs on remote `unleashed.lan`, not local — no `~/.claude/quota-status/*` files on this machine, so FR-7 extras silently omitted per spec.
 
 ## Blockers
 
@@ -75,11 +121,11 @@ None.
 
 A future agent running `/session --load` on this file should in the first 5 actions:
 
-1. Read this CONTINUITY → see v5.0.0 shipped, no in-flight work, F-001 complete.
-2. Run `npm view contextbricks-universal version` → confirm `5.0.0` (or newer).
-3. Run `git log --oneline -3` → see `0a3bf4d docs(continuity): session save after v5.0.0 release` at HEAD on main.
-4. Check `~/.claude/settings.json → statusLine.command` → confirm live dev-path; check `CONTEXTBRICKS_QUOTA_PROBE_MODEL` env presence (required for CPA-mode users on this box).
-5. Observe statusline Line 4 → should show `session:NN%/MM% +X.Y/m ~Zd | week:...` (real ratelimit data) when env-pinned model works against the active proxy; or honest `[hint]` message when probe fails.
+1. Read this CONTINUITY → see v5.0.1 shipped via packaged install, no in-flight work, CR-002 closed.
+2. Run `npm view contextbricks-universal version` → confirm `5.0.1` (or newer).
+3. Run `git log --oneline -3` → expect `df24845 fix(installer): copy scripts/lib/ alongside statusline.js [v5.0.1]` at or near HEAD on main.
+4. Check `~/.claude/settings.json → statusLine.command` → confirm path = `C:/nvm4w/nodejs/node.exe C:/Users/btf/.claude/statusline.js` (packaged install). Check `~/.claude/lib/` exists with 8 top-level files + `format/` subdir.
+5. Observe statusline Line 4 → should show `session:NN%/MM% +X.Y/m ~Zd | week:...` (real ratelimit data) through CPA fallback chain. Without `CONTEXTBRICKS_QUOTA_PROBE_MODEL` env, default haiku chain fails on `unleashed.lan` and falls back — works but pays one extra round-trip per cache miss.
 
 ## What This Project Does
 

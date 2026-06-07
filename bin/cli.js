@@ -144,19 +144,34 @@ function install() {
     }
     fs.copyFileSync(STATUSLINE_SCRIPT, INSTALL_PATH);
   } catch (err) {
-    // Rollback: restore prior statusline.js from backup. lib/ was already
-    // written successfully and is forward-compatible with the prior script.
+    // Atomic rollback: restore BOTH the prior statusline.js AND the prior
+    // lib/. Leaving the new lib/ in place with the old script would create
+    // a hybrid state — old script loading new library modules — that we
+    // cannot assert is forward-compatible across future releases.
     //
     // Asymmetry note: Step 1 rollback uses rename (atomic move — backup
-    // disappears in the same operation), Step 2 rollback uses copy (the
-    // .backup-<ts> file remains on disk by design — leaves an audit trail
-    // for a user investigating why install failed).
+    // disappears in the same operation), Step 2 script rollback uses copy
+    // (the .backup-<ts> file remains on disk by design — leaves an audit
+    // trail for a user investigating why install failed). The lib/
+    // rollback inside Step 2 uses the same rmSync-then-rename pattern as
+    // Step 1 rollback.
     if (scriptBackup) {
       try {
         fs.copyFileSync(scriptBackup, INSTALL_PATH);
       } catch (rollbackErr) {
         console.error(`${c.red}Error: Rollback of statusline script failed: ${rollbackErr.message}${c.reset}`);
         console.error(`${c.red}   Backup preserved at: ${scriptBackup}${c.reset}`);
+      }
+    }
+    if (libBackup) {
+      try {
+        if (pathEntryExists(INSTALL_LIB_DIR)) {
+          fs.rmSync(INSTALL_LIB_DIR, { recursive: true, force: true });
+        }
+        fs.renameSync(libBackup, INSTALL_LIB_DIR);
+      } catch (rollbackErr) {
+        console.error(`${c.red}Error: Rollback of lib directory failed: ${rollbackErr.message}${c.reset}`);
+        console.error(`${c.red}   Backup preserved at: ${libBackup}${c.reset}`);
       }
     }
     console.error(`${c.red}Error: Could not install statusline script at ${INSTALL_PATH}: ${err.message}${c.reset}`);

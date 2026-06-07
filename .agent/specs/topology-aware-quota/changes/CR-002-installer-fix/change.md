@@ -119,6 +119,22 @@ New AC additions for these:
 | 6 | CodeRabbit minor | rollback asymmetry (Step 1 rename removes backup, Step 2 copy leaves backup) — needs comment | Asymmetry-note comment added in cli.js Step 2 rollback path |
 | 7 | CodeRabbit minor | PR body / AC-1 said "12 files" but lib has 11 | AC-1 corrected to explicit "8 top-level + 3 in format/" enumeration |
 
+## Round 4 amendments (Gemini round-3 review, CodeRabbit round-3)
+
+| # | Source | Finding | Fix |
+|---|--------|---------|-----|
+| 8 | CodeRabbit MAJOR | `renameSync(libBackup → INSTALL_LIB_DIR)` fails if `cpSync` left a partial `INSTALL_LIB_DIR`; rollback error silently swallowed | Rollback now `rmSync` of any partial INSTALL_LIB_DIR before `renameSync`; rollback errors surfaced with preserved backup path |
+| 9 | Gemini medium | `backupDir(INSTALL_LIB_DIR)` called outside try/catch — backup failure produces raw stack trace | Move `backupDir` call inside the try block of Step 1 |
+| 10 | Gemini medium | `backupFile(INSTALL_PATH)` called outside try/catch — same risk for script | Move `backupFile` call inside the try block of Step 2 |
+| 11 | Gemini medium | `unlinkSync(INSTALL_PATH)` in uninstall not wrapped — Windows EBUSY aborts before settings.json cleanup | try/catch with warning + continue, mirrors the AC-10 rmSync pattern |
+| 12 | CodeRabbit minor | Evidence section said `engines is >=18` while package.json says `>=16.7` | change.md Evidence corrected to `>=16.7` |
+| 13 | CodeRabbit minor | Stray `</content></invoke>` trailing tags in change.md (Write-tool input artefact) | Removed |
+| 14 | CodeRabbit minor | README says `Node.js >= 14` while engines is `>=16.7` | README updated to `>= 16.7` with installer reason |
+
+Deferred (TECHNICAL_DEBT):
+- CodeRabbit cosmetic: `pathEntryExists(SETTINGS_FILE)` for symmetry — settings.json is never a symlink in practice; no behaviour delta.
+- CodeRabbit carried: one-line `// rename, not copy` comment on `backupDir()` — CHANGELOG and Step 1+2 catch blocks already explain the asymmetry; redundant.
+
 ## Tasks
 
 - **T1:** Patch `bin/cli.js` install action — add `fs.cpSync` of
@@ -145,6 +161,4 @@ New AC additions for these:
   postinstall ran → smoke pipe → `Error: Cannot find module './lib/ansi'`
   (verified 2026-06-08).
 - Node 16.7+ has `fs.cpSync({recursive:true})` (engines field in
-  package.json is `>=18` — well above floor).
-</content>
-</invoke>
+  package.json is `>=16.7` — matches the minimum required floor).

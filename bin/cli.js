@@ -40,8 +40,15 @@ function checkDependencies() {
 
 // fs.lstatSync with throwIfNoEntry:false detects any file system entry,
 // including broken symlinks (where fs.existsSync silently returns false).
+// The try/catch handles the residual non-ENOENT errors (EACCES/EPERM) that
+// throwIfNoEntry does not suppress — these would otherwise crash the
+// installer with a raw stack trace.
 function pathEntryExists(p) {
-  return fs.lstatSync(p, { throwIfNoEntry: false }) != null;
+  try {
+    return fs.lstatSync(p, { throwIfNoEntry: false }) != null;
+  } catch {
+    return false;
+  }
 }
 
 function backupFile(filePath) {

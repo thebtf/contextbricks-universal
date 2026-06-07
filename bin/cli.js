@@ -9,6 +9,7 @@ const os = require('os');
 
 const command = process.argv[2];
 const STATUSLINE_SCRIPT = path.join(__dirname, '..', 'scripts', 'statusline.js');
+const LIB_SRC = path.join(__dirname, '..', 'scripts', 'lib');
 
 // Colors for terminal output
 const c = {
@@ -24,6 +25,7 @@ const c = {
 // Paths
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const INSTALL_PATH = path.join(CLAUDE_DIR, 'statusline.js');
+const INSTALL_LIB_DIR = path.join(CLAUDE_DIR, 'lib');
 const SETTINGS_FILE = path.join(CLAUDE_DIR, 'settings.json');
 
 function checkDependencies() {
@@ -41,6 +43,16 @@ function backupFile(filePath) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
     const backupPath = `${filePath}.backup-${timestamp}`;
     fs.copyFileSync(filePath, backupPath);
+    return backupPath;
+  }
+  return null;
+}
+
+function backupDir(dirPath) {
+  if (fs.existsSync(dirPath)) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+    const backupPath = `${dirPath}.backup-${timestamp}`;
+    fs.renameSync(dirPath, backupPath);
     return backupPath;
   }
   return null;
@@ -71,8 +83,23 @@ function install() {
     console.error(`${c.red}Error: Source script not found: ${STATUSLINE_SCRIPT}${c.reset}`);
     process.exit(1);
   }
+  if (!fs.existsSync(LIB_SRC)) {
+    console.error(`${c.red}Error: Source lib directory not found: ${LIB_SRC}${c.reset}`);
+    process.exit(1);
+  }
   fs.copyFileSync(STATUSLINE_SCRIPT, INSTALL_PATH);
   console.log(`   Installed: ${INSTALL_PATH}`);
+
+  // Backup existing lib directory (a broken v5.0.0 install will not have one;
+  // a prior v5.0.1+ install will).
+  const libBackup = backupDir(INSTALL_LIB_DIR);
+  if (libBackup) {
+    console.log(`Backed up existing lib directory: ${libBackup}`);
+  }
+
+  // Copy scripts/lib recursively — statusline.js requires `./lib/*` siblings.
+  fs.cpSync(LIB_SRC, INSTALL_LIB_DIR, { recursive: true });
+  console.log(`   Installed: ${INSTALL_LIB_DIR}`);
   console.log('');
 
   // Build the command string for settings.json
@@ -137,6 +164,13 @@ function uninstall() {
     console.log(`${c.yellow}Status line script not found (already removed?)${c.reset}`);
   }
 
+  // Remove lib directory (sibling modules of statusline.js)
+  if (fs.existsSync(INSTALL_LIB_DIR)) {
+    console.log('Removing lib directory...');
+    fs.rmSync(INSTALL_LIB_DIR, { recursive: true, force: true });
+    console.log(`   Removed: ${INSTALL_LIB_DIR}`);
+  }
+
   console.log('');
 
   // Update settings.json - remove statusLine key
@@ -158,7 +192,9 @@ function uninstall() {
   try {
     const files = fs.readdirSync(CLAUDE_DIR);
     for (const file of files) {
-      if (file.startsWith('statusline.js.backup-') || file.startsWith('settings.json.backup-')) {
+      if (file.startsWith('statusline.js.backup-')
+        || file.startsWith('settings.json.backup-')
+        || file.startsWith('lib.backup-')) {
         backups.push(path.join(CLAUDE_DIR, file));
       }
     }

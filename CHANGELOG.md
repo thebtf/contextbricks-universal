@@ -1,5 +1,18 @@
 # Changelog
 
+## [5.0.1] — 2026-06-08
+
+### Fixed
+- **Installer copies all script modules, not just `statusline.js`.** v5.0.0's `bin/cli.js install` copied only `scripts/statusline.js` into `~/.claude/`, leaving the deployed file unable to `require('./lib/ansi')` and friends — every fresh `npm i -g contextbricks-universal@5.0.0` produced a statusline that crashed on first invocation with `Error: Cannot find module './lib/ansi'`. Installer now recursively copies `scripts/lib/` to `~/.claude/lib/` alongside `statusline.js`. Live dev users wired to the repo path were unaffected by the v5.0.0 defect.
+- **`contextbricks uninstall` cleans up the lib directory.** Symmetric to install — removes both `~/.claude/statusline.js` and `~/.claude/lib/`.
+
+### Changed
+- **Existing `~/.claude/lib/` is now backed up** as `lib.backup-<timestamp>/` on re-install (mirrors the existing `statusline.js.backup-<timestamp>` behaviour).
+- **`engines.node` bumped to `>=16.7`** to reflect actual install-time requirement (`fs.cpSync({recursive:true})` is Node 16.7+).
+
+### Architecture references
+- CR change brief: `.agent/specs/topology-aware-quota/changes/CR-002-installer-fix/change.md`
+
 ## [5.0.0] — 2026-05-07
 
 ### Changed (BREAKING for nobody — proxy-mode users gain quota visibility, native users see no diff)

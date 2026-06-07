@@ -38,8 +38,14 @@ function checkDependencies() {
   console.log(`${c.green}Dependencies OK${c.reset} (Node.js ${process.version})`);
 }
 
+// fs.lstatSync with throwIfNoEntry:false detects any file system entry,
+// including broken symlinks (where fs.existsSync silently returns false).
+function pathEntryExists(p) {
+  return fs.lstatSync(p, { throwIfNoEntry: false }) != null;
+}
+
 function backupFile(filePath) {
-  if (fs.existsSync(filePath)) {
+  if (pathEntryExists(filePath)) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
     const backupPath = `${filePath}.backup-${timestamp}`;
     fs.copyFileSync(filePath, backupPath);
@@ -49,7 +55,7 @@ function backupFile(filePath) {
 }
 
 function backupDir(dirPath) {
-  if (fs.existsSync(dirPath)) {
+  if (pathEntryExists(dirPath)) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
     const backupPath = `${dirPath}.backup-${timestamp}`;
     fs.renameSync(dirPath, backupPath);
@@ -71,14 +77,7 @@ function install() {
     console.log(`Created: ${CLAUDE_DIR}`);
   }
 
-  // Backup existing statusline script
-  const scriptBackup = backupFile(INSTALL_PATH);
-  if (scriptBackup) {
-    console.log(`Backed up existing script: ${scriptBackup}`);
-  }
-
-  // Copy statusline.js
-  console.log('Installing status line script...');
+  // Validate sources before touching the install destination.
   if (!fs.existsSync(STATUSLINE_SCRIPT)) {
     console.error(`${c.red}Error: Source script not found: ${STATUSLINE_SCRIPT}${c.reset}`);
     process.exit(1);
@@ -87,19 +86,49 @@ function install() {
     console.error(`${c.red}Error: Source lib directory not found: ${LIB_SRC}${c.reset}`);
     process.exit(1);
   }
-  fs.copyFileSync(STATUSLINE_SCRIPT, INSTALL_PATH);
-  console.log(`   Installed: ${INSTALL_PATH}`);
 
-  // Backup existing lib directory (a broken v5.0.0 install will not have one;
-  // a prior v5.0.1+ install will).
+  // Install order matters: copy lib/ BEFORE statusline.js. statusline.js
+  // requires its lib/ siblings; if the lib copy fails after the script
+  // copy, the old script keeps loading the old lib/ instead of crashing
+  // with MODULE_NOT_FOUND (which is the exact v5.0.0 defect this PR fixes).
+
+  // Step 1 — lib/
+  console.log('Installing status line modules...');
   const libBackup = backupDir(INSTALL_LIB_DIR);
   if (libBackup) {
     console.log(`Backed up existing lib directory: ${libBackup}`);
   }
-
-  // Copy scripts/lib recursively — statusline.js requires `./lib/*` siblings.
-  fs.cpSync(LIB_SRC, INSTALL_LIB_DIR, { recursive: true });
+  try {
+    fs.cpSync(LIB_SRC, INSTALL_LIB_DIR, { recursive: true });
+  } catch (err) {
+    // Rollback: restore prior lib/ from backup so the user is not left
+    // with a half-written install.
+    if (libBackup) {
+      try { fs.renameSync(libBackup, INSTALL_LIB_DIR); } catch {}
+    }
+    console.error(`${c.red}Error: Could not copy lib directory to ${INSTALL_LIB_DIR}: ${err.message}${c.reset}`);
+    process.exit(1);
+  }
   console.log(`   Installed: ${INSTALL_LIB_DIR}`);
+
+  // Step 2 — statusline.js
+  console.log('Installing status line script...');
+  const scriptBackup = backupFile(INSTALL_PATH);
+  if (scriptBackup) {
+    console.log(`Backed up existing script: ${scriptBackup}`);
+  }
+  try {
+    fs.copyFileSync(STATUSLINE_SCRIPT, INSTALL_PATH);
+  } catch (err) {
+    // Rollback: restore prior statusline.js from backup. lib/ was already
+    // written successfully and is forward-compatible with the prior script.
+    if (scriptBackup) {
+      try { fs.copyFileSync(scriptBackup, INSTALL_PATH); } catch {}
+    }
+    console.error(`${c.red}Error: Could not copy statusline script to ${INSTALL_PATH}: ${err.message}${c.reset}`);
+    process.exit(1);
+  }
+  console.log(`   Installed: ${INSTALL_PATH}`);
   console.log('');
 
   // Build the command string for settings.json
@@ -155,8 +184,8 @@ ${c.cyan}Restart Claude Code to see your new status line!${c.reset}
 function uninstall() {
   console.log(`\n${c.cyan}${c.bold}ContextBricks${c.reset} - Uninstaller\n`);
 
-  // Remove statusline script
-  if (fs.existsSync(INSTALL_PATH)) {
+  // Remove statusline script (pathEntryExists catches broken symlinks too).
+  if (pathEntryExists(INSTALL_PATH)) {
     console.log('Removing status line script...');
     fs.unlinkSync(INSTALL_PATH);
     console.log(`   Removed: ${INSTALL_PATH}`);
@@ -164,8 +193,8 @@ function uninstall() {
     console.log(`${c.yellow}Status line script not found (already removed?)${c.reset}`);
   }
 
-  // Remove lib directory (sibling modules of statusline.js)
-  if (fs.existsSync(INSTALL_LIB_DIR)) {
+  // Remove lib directory (sibling modules of statusline.js).
+  if (pathEntryExists(INSTALL_LIB_DIR)) {
     console.log('Removing lib directory...');
     fs.rmSync(INSTALL_LIB_DIR, { recursive: true, force: true });
     console.log(`   Removed: ${INSTALL_LIB_DIR}`);

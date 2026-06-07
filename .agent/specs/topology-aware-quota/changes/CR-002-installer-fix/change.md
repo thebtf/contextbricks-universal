@@ -88,6 +88,26 @@ deployed surface).
 - Migrating to symlinks (cross-platform fragility on Windows).
 - Refactoring `bin/cli.js` beyond what AC-1..AC-6 require.
 
+## Review-Cycle Amendments (2026-06-08, post AI-review)
+
+CodeRabbit and Gemini reviewed the initial CR-002 patch and surfaced four
+non-blocking findings; all four were accepted under
+`long-term-integrity-over-speed` (installer = public interface, partial-failure
+path warrants structural rather than localised fix; no quick-patch override
+named):
+
+| # | Source | Finding | Fix in this CR |
+|---|--------|---------|----------------|
+| 1 | CodeRabbit | Non-atomic install: if `lib/` copy fails after `statusline.js` copy, recreates the v5.0.0 defect | Swap copy order — `lib/` first, then `statusline.js` |
+| 2 | CodeRabbit | Missing try/catch on `fs.copyFileSync` and `fs.cpSync` produces raw stack traces | Wrap both copy ops with rollback-on-error + friendly message |
+| 3 | Gemini | `fs.existsSync` in `backupDir` returns `false` on broken symlinks → backup skipped, `cpSync` then misbehaves | Replace with `fs.lstatSync({throwIfNoEntry:false})` via new `pathEntryExists()` helper |
+| 4 | Gemini | Same broken-symlink risk in uninstall cleanup | Same helper applied at uninstall site |
+
+New AC additions for these:
+- [ ] AC-7: install order is `lib/` first, `statusline.js` second.
+- [ ] AC-8: a forced `cpSync` failure restores the previous `lib/` from backup, leaves `statusline.js` unchanged, exits 1 with a friendly message.
+- [ ] AC-9: `pathEntryExists()` is used at all 3 file-system probe sites that target install artefacts (backupDir, backupFile, uninstall).
+
 ## Tasks
 
 - **T1:** Patch `bin/cli.js` install action — add `fs.cpSync` of

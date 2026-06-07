@@ -9,6 +9,7 @@ const os = require('os');
 
 const command = process.argv[2];
 const STATUSLINE_SCRIPT = path.join(__dirname, '..', 'scripts', 'statusline.js');
+const LIB_SRC = path.join(__dirname, '..', 'scripts', 'lib');
 
 // Colors for terminal output
 const c = {
@@ -24,6 +25,7 @@ const c = {
 // Paths
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const INSTALL_PATH = path.join(CLAUDE_DIR, 'statusline.js');
+const INSTALL_LIB_DIR = path.join(CLAUDE_DIR, 'lib');
 const SETTINGS_FILE = path.join(CLAUDE_DIR, 'settings.json');
 
 function checkDependencies() {
@@ -36,11 +38,34 @@ function checkDependencies() {
   console.log(`${c.green}Dependencies OK${c.reset} (Node.js ${process.version})`);
 }
 
+// fs.lstatSync with throwIfNoEntry:false detects any file system entry,
+// including broken symlinks (where fs.existsSync silently returns false).
+// The try/catch handles the residual non-ENOENT errors (EACCES/EPERM) that
+// throwIfNoEntry does not suppress — these would otherwise crash the
+// installer with a raw stack trace.
+function pathEntryExists(p) {
+  try {
+    return fs.lstatSync(p, { throwIfNoEntry: false }) != null;
+  } catch {
+    return false;
+  }
+}
+
 function backupFile(filePath) {
-  if (fs.existsSync(filePath)) {
+  if (pathEntryExists(filePath)) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
     const backupPath = `${filePath}.backup-${timestamp}`;
     fs.copyFileSync(filePath, backupPath);
+    return backupPath;
+  }
+  return null;
+}
+
+function backupDir(dirPath) {
+  if (pathEntryExists(dirPath)) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+    const backupPath = `${dirPath}.backup-${timestamp}`;
+    fs.renameSync(dirPath, backupPath);
     return backupPath;
   }
   return null;
@@ -59,19 +84,99 @@ function install() {
     console.log(`Created: ${CLAUDE_DIR}`);
   }
 
-  // Backup existing statusline script
-  const scriptBackup = backupFile(INSTALL_PATH);
-  if (scriptBackup) {
-    console.log(`Backed up existing script: ${scriptBackup}`);
-  }
-
-  // Copy statusline.js
-  console.log('Installing status line script...');
+  // Validate sources before touching the install destination.
   if (!fs.existsSync(STATUSLINE_SCRIPT)) {
     console.error(`${c.red}Error: Source script not found: ${STATUSLINE_SCRIPT}${c.reset}`);
     process.exit(1);
   }
-  fs.copyFileSync(STATUSLINE_SCRIPT, INSTALL_PATH);
+  if (!fs.existsSync(LIB_SRC)) {
+    console.error(`${c.red}Error: Source lib directory not found: ${LIB_SRC}${c.reset}`);
+    process.exit(1);
+  }
+
+  // Install order matters: copy lib/ BEFORE statusline.js. statusline.js
+  // requires its lib/ siblings; if the lib copy fails after the script
+  // copy, the old script keeps loading the old lib/ instead of crashing
+  // with MODULE_NOT_FOUND (which is the exact v5.0.0 defect this PR fixes).
+
+  // Step 1 — lib/
+  // backupDir + cpSync inside the same try so EBUSY / EPERM during backup
+  // (Windows: locked directory) hits the friendly catch instead of a raw
+  // Node stack. Rollback explicitly clears any partial INSTALL_LIB_DIR
+  // before rename, since cpSync may have created the directory before
+  // failing — renameSync onto a non-empty path fails on Windows.
+  console.log('Installing status line modules...');
+  let libBackup = null;
+  try {
+    libBackup = backupDir(INSTALL_LIB_DIR);
+    if (libBackup) {
+      console.log(`Backed up existing lib directory: ${libBackup}`);
+    }
+    fs.cpSync(LIB_SRC, INSTALL_LIB_DIR, { recursive: true });
+  } catch (err) {
+    if (libBackup) {
+      try {
+        if (pathEntryExists(INSTALL_LIB_DIR)) {
+          fs.rmSync(INSTALL_LIB_DIR, { recursive: true, force: true });
+        }
+        fs.renameSync(libBackup, INSTALL_LIB_DIR);
+      } catch (rollbackErr) {
+        // Surface rollback failure — silently swallowing it would leave the
+        // user with a corrupted install they cannot diagnose.
+        console.error(`${c.red}Error: Rollback of lib directory failed: ${rollbackErr.message}${c.reset}`);
+        console.error(`${c.red}   Backup preserved at: ${libBackup}${c.reset}`);
+      }
+    }
+    console.error(`${c.red}Error: Could not install lib directory at ${INSTALL_LIB_DIR}: ${err.message}${c.reset}`);
+    process.exit(1);
+  }
+  console.log(`   Installed: ${INSTALL_LIB_DIR}`);
+
+  // Step 2 — statusline.js
+  // Same pattern: backupFile + copyFileSync in one try. Rollback uses
+  // copy (not rename — see Asymmetry note below).
+  console.log('Installing status line script...');
+  let scriptBackup = null;
+  try {
+    scriptBackup = backupFile(INSTALL_PATH);
+    if (scriptBackup) {
+      console.log(`Backed up existing script: ${scriptBackup}`);
+    }
+    fs.copyFileSync(STATUSLINE_SCRIPT, INSTALL_PATH);
+  } catch (err) {
+    // Atomic rollback: restore BOTH the prior statusline.js AND the prior
+    // lib/. Leaving the new lib/ in place with the old script would create
+    // a hybrid state — old script loading new library modules — that we
+    // cannot assert is forward-compatible across future releases.
+    //
+    // Asymmetry note: Step 1 rollback uses rename (atomic move — backup
+    // disappears in the same operation), Step 2 script rollback uses copy
+    // (the .backup-<ts> file remains on disk by design — leaves an audit
+    // trail for a user investigating why install failed). The lib/
+    // rollback inside Step 2 uses the same rmSync-then-rename pattern as
+    // Step 1 rollback.
+    if (scriptBackup) {
+      try {
+        fs.copyFileSync(scriptBackup, INSTALL_PATH);
+      } catch (rollbackErr) {
+        console.error(`${c.red}Error: Rollback of statusline script failed: ${rollbackErr.message}${c.reset}`);
+        console.error(`${c.red}   Backup preserved at: ${scriptBackup}${c.reset}`);
+      }
+    }
+    if (libBackup) {
+      try {
+        if (pathEntryExists(INSTALL_LIB_DIR)) {
+          fs.rmSync(INSTALL_LIB_DIR, { recursive: true, force: true });
+        }
+        fs.renameSync(libBackup, INSTALL_LIB_DIR);
+      } catch (rollbackErr) {
+        console.error(`${c.red}Error: Rollback of lib directory failed: ${rollbackErr.message}${c.reset}`);
+        console.error(`${c.red}   Backup preserved at: ${libBackup}${c.reset}`);
+      }
+    }
+    console.error(`${c.red}Error: Could not install statusline script at ${INSTALL_PATH}: ${err.message}${c.reset}`);
+    process.exit(1);
+  }
   console.log(`   Installed: ${INSTALL_PATH}`);
   console.log('');
 
@@ -128,13 +233,38 @@ ${c.cyan}Restart Claude Code to see your new status line!${c.reset}
 function uninstall() {
   console.log(`\n${c.cyan}${c.bold}ContextBricks${c.reset} - Uninstaller\n`);
 
-  // Remove statusline script
-  if (fs.existsSync(INSTALL_PATH)) {
+  // Remove statusline script (pathEntryExists catches broken symlinks too).
+  // unlinkSync wrapped in try/catch for the same reason as rmSync below:
+  // an EBUSY / EPERM on Windows must not abort before settings.json cleanup.
+  if (pathEntryExists(INSTALL_PATH)) {
     console.log('Removing status line script...');
-    fs.unlinkSync(INSTALL_PATH);
-    console.log(`   Removed: ${INSTALL_PATH}`);
+    try {
+      fs.unlinkSync(INSTALL_PATH);
+      console.log(`   Removed: ${INSTALL_PATH}`);
+    } catch (err) {
+      console.warn(`${c.yellow}Warning: Could not remove statusline script: ${err.message}${c.reset}`);
+      console.warn(`${c.yellow}   Continuing with settings.json cleanup — delete ${INSTALL_PATH} manually after closing Claude Code.${c.reset}`);
+    }
   } else {
     console.log(`${c.yellow}Status line script not found (already removed?)${c.reset}`);
+  }
+
+  // Remove lib directory (sibling modules of statusline.js).
+  //
+  // Wrap rmSync in try/catch so an EBUSY / EPERM on Windows (Claude Code
+  // holding a file handle on a lib/ module) does NOT abort the uninstall
+  // before the settings.json cleanup below runs. Otherwise the user is
+  // left with a statusLine command pointing at a removed script — Claude
+  // Code then errors on every prompt.
+  if (pathEntryExists(INSTALL_LIB_DIR)) {
+    console.log('Removing lib directory...');
+    try {
+      fs.rmSync(INSTALL_LIB_DIR, { recursive: true, force: true });
+      console.log(`   Removed: ${INSTALL_LIB_DIR}`);
+    } catch (err) {
+      console.warn(`${c.yellow}Warning: Could not fully remove lib directory: ${err.message}${c.reset}`);
+      console.warn(`${c.yellow}   Continuing with settings.json cleanup — delete ${INSTALL_LIB_DIR} manually after closing Claude Code.${c.reset}`);
+    }
   }
 
   console.log('');
@@ -158,7 +288,9 @@ function uninstall() {
   try {
     const files = fs.readdirSync(CLAUDE_DIR);
     for (const file of files) {
-      if (file.startsWith('statusline.js.backup-') || file.startsWith('settings.json.backup-')) {
+      if (file.startsWith('statusline.js.backup-')
+        || file.startsWith('settings.json.backup-')
+        || file.startsWith('lib.backup-')) {
         backups.push(path.join(CLAUDE_DIR, file));
       }
     }

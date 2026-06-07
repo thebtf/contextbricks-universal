@@ -254,7 +254,7 @@ contextbricks test
 
 ## Requirements
 
-- **Node.js** >= 14
+- **Node.js** >= 16.7 (installer uses `fs.cpSync({recursive:true})`)
 - **git** (optional, for git info display)
 
 No bash, jq, bc, sed, cut, or any other Unix tools required.

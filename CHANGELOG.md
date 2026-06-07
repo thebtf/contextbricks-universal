@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.0.1] — 2026-06-08
+
+### Fixed
+- **Installer copies all script modules, not just `statusline.js`.** v5.0.0's `bin/cli.js install` copied only `scripts/statusline.js` into `~/.claude/`, leaving the deployed file unable to `require('./lib/ansi')` and friends — every fresh `npm i -g contextbricks-universal@5.0.0` produced a statusline that crashed on first invocation with `Error: Cannot find module './lib/ansi'`. Installer now recursively copies `scripts/lib/` to `~/.claude/lib/` alongside `statusline.js`. Live dev users wired to the repo path were unaffected by the v5.0.0 defect.
+- **`contextbricks uninstall` cleans up the lib directory.** Symmetric to install — removes both `~/.claude/statusline.js` and `~/.claude/lib/`.
+- **Install ordering is now crash-safe.** `lib/` is copied BEFORE `statusline.js`. If the lib copy fails (permissions, disk full, network home), the old script keeps loading the old `lib/` siblings instead of crashing with `MODULE_NOT_FOUND` — the exact v5.0.0 defect this release fixes. Each copy step is wrapped in try/catch with rollback from the backup, producing a friendly error message and `process.exit(1)` instead of a raw Node stack trace.
+- **Broken symlink hygiene.** `backupDir`, `backupFile`, and uninstall now use `fs.lstatSync({ throwIfNoEntry: false })` instead of `fs.existsSync` to detect any filesystem entry, including broken symlinks (where `existsSync` silently returns `false` and leaves a dangling link behind).
+- **Uninstall completes settings.json cleanup even when `lib/` removal fails.** `fs.rmSync` on `~/.claude/lib/` (and `fs.unlinkSync` on `~/.claude/statusline.js`) are now wrapped in try/catch with warnings; an `EBUSY` / `EPERM` on Windows (Claude Code holding a file handle) no longer aborts the uninstaller before `settings.json` is cleaned, which would leave the `statusLine` command pointing at a removed script and break Claude Code on every prompt.
+- **Robust install rollback.** Backup operations (`backupDir`, `backupFile`) and copy operations are now wrapped in the same try/catch block, so any failure (locked source, permission error) routes through the friendly-error + rollback path instead of producing a raw Node stack trace. The Step 1 `lib/` rollback now removes any partially-written `INSTALL_LIB_DIR` before restoring from backup (renameSync onto a non-empty path fails on Windows), and rollback failures themselves are surfaced with the preserved backup path instead of silently swallowed.
+- **README Node requirement matches `engines.node`** (`>= 16.7`, was `>= 14`).
+
+### Changed
+- **Existing `~/.claude/lib/` is now backed up** as `lib.backup-<timestamp>/` on re-install (mirrors the existing `statusline.js.backup-<timestamp>` behaviour).
+- **`engines.node` bumped to `>=16.7`** to reflect actual install-time requirement (`fs.cpSync({recursive:true})` is Node 16.7+).
+
+### Architecture references
+- CR change brief: `.agent/specs/topology-aware-quota/changes/CR-002-installer-fix/change.md`
+
 ## [5.0.0] — 2026-05-07
 
 ### Changed (BREAKING for nobody — proxy-mode users gain quota visibility, native users see no diff)

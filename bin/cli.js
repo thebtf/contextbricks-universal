@@ -122,6 +122,11 @@ function install() {
   } catch (err) {
     // Rollback: restore prior statusline.js from backup. lib/ was already
     // written successfully and is forward-compatible with the prior script.
+    //
+    // Asymmetry note: Step 1 rollback uses rename (atomic move — backup
+    // disappears in the same operation), Step 2 rollback uses copy (the
+    // .backup-<ts> file remains on disk by design — leaves an audit trail
+    // for a user investigating why install failed).
     if (scriptBackup) {
       try { fs.copyFileSync(scriptBackup, INSTALL_PATH); } catch {}
     }
@@ -194,10 +199,21 @@ function uninstall() {
   }
 
   // Remove lib directory (sibling modules of statusline.js).
+  //
+  // Wrap rmSync in try/catch so an EBUSY / EPERM on Windows (Claude Code
+  // holding a file handle on a lib/ module) does NOT abort the uninstall
+  // before the settings.json cleanup below runs. Otherwise the user is
+  // left with a statusLine command pointing at a removed script — Claude
+  // Code then errors on every prompt.
   if (pathEntryExists(INSTALL_LIB_DIR)) {
     console.log('Removing lib directory...');
-    fs.rmSync(INSTALL_LIB_DIR, { recursive: true, force: true });
-    console.log(`   Removed: ${INSTALL_LIB_DIR}`);
+    try {
+      fs.rmSync(INSTALL_LIB_DIR, { recursive: true, force: true });
+      console.log(`   Removed: ${INSTALL_LIB_DIR}`);
+    } catch (err) {
+      console.warn(`${c.yellow}Warning: Could not fully remove lib directory: ${err.message}${c.reset}`);
+      console.warn(`${c.yellow}   Continuing with settings.json cleanup — delete ${INSTALL_LIB_DIR} manually after closing Claude Code.${c.reset}`);
+    }
   }
 
   console.log('');

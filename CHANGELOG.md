@@ -7,6 +7,7 @@
 - **`contextbricks uninstall` cleans up the lib directory.** Symmetric to install — removes both `~/.claude/statusline.js` and `~/.claude/lib/`.
 - **Install ordering is now crash-safe.** `lib/` is copied BEFORE `statusline.js`. If the lib copy fails (permissions, disk full, network home), the old script keeps loading the old `lib/` siblings instead of crashing with `MODULE_NOT_FOUND` — the exact v5.0.0 defect this release fixes. Each copy step is wrapped in try/catch with rollback from the backup, producing a friendly error message and `process.exit(1)` instead of a raw Node stack trace.
 - **Broken symlink hygiene.** `backupDir`, `backupFile`, and uninstall now use `fs.lstatSync({ throwIfNoEntry: false })` instead of `fs.existsSync` to detect any filesystem entry, including broken symlinks (where `existsSync` silently returns `false` and leaves a dangling link behind).
+- **Uninstall completes settings.json cleanup even when `lib/` removal fails.** `fs.rmSync` on `~/.claude/lib/` is now wrapped in try/catch with a warning; an `EBUSY` / `EPERM` on Windows (Claude Code holding a file handle) no longer aborts the uninstaller before `settings.json` is cleaned, which would leave the `statusLine` command pointing at a removed script and break Claude Code on every prompt.
 
 ### Changed
 - **Existing `~/.claude/lib/` is now backed up** as `lib.backup-<timestamp>/` on re-install (mirrors the existing `statusline.js.backup-<timestamp>` behaviour).

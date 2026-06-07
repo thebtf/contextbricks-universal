@@ -69,8 +69,10 @@ deployed surface).
 ## Acceptance Criteria
 
 - [ ] AC-1: Fresh `npm i -g contextbricks-universal@5.0.1` deploys
-  `~/.claude/statusline.js` AND `~/.claude/lib/` (12 files in correct
-  subdirectory layout).
+  `~/.claude/statusline.js` AND `~/.claude/lib/` (11 files: 8 at top
+  level — ansi, creds, detect-term-width, meter-extras, quota-parser,
+  quota-source, rate-view, topology — plus 3 under `format/`:
+  extras-tail, rate-limit-line, ttl-prefix).
 - [ ] AC-2: `echo '<minimal-stdin>' | node ~/.claude/statusline.js` runs
   without `MODULE_NOT_FOUND`, prints rendered statusline.
 - [ ] AC-3: `contextbricks uninstall` removes both `~/.claude/statusline.js`
@@ -107,6 +109,15 @@ New AC additions for these:
 - [ ] AC-7: install order is `lib/` first, `statusline.js` second.
 - [ ] AC-8: a forced `cpSync` failure restores the previous `lib/` from backup, leaves `statusline.js` unchanged, exits 1 with a friendly message.
 - [ ] AC-9: `pathEntryExists()` is used at all 3 file-system probe sites that target install artefacts (backupDir, backupFile, uninstall).
+- [ ] AC-10: a failed `rmSync` on `~/.claude/lib/` during uninstall emits a warning and continues to settings.json cleanup; `statusLine.command` is removed from settings.json regardless of lib-removal outcome.
+
+## Round 3 amendments (Gemini round-2 review, CodeRabbit minors)
+
+| # | Source | Finding | Fix |
+|---|--------|---------|-----|
+| 5 | Gemini HIGH | `fs.rmSync(lib/)` crash aborts uninstall before settings.json cleanup → broken Claude Code state | try/catch around rmSync with warning + continue to settings.json (AC-10) |
+| 6 | CodeRabbit minor | rollback asymmetry (Step 1 rename removes backup, Step 2 copy leaves backup) — needs comment | Asymmetry-note comment added in cli.js Step 2 rollback path |
+| 7 | CodeRabbit minor | PR body / AC-1 said "12 files" but lib has 11 | AC-1 corrected to explicit "8 top-level + 3 in format/" enumeration |
 
 ## Tasks
 
